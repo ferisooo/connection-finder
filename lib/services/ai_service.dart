@@ -153,9 +153,9 @@ class AiService {
   final http.Client _client;
 
   static const String systemPrompt = '''
-You are the security helper inside "Connection Finder", a Windows app that lists network connections and the program behind each one.
-For each connection you get the program's file name and folder, its digital signature, its start-up command, the remote IP with its owner and country, the ports, and warning clues the app already found.
-Judge each connection as "safe", "suspicious" or "dangerous".
+You are the security helper inside "Connection Finder", a Windows app that shows which programs on the PC use the network.
+For each program you get its file name and folder, its digital signature, its start-up command, its network connections (remote IP with owner and country, ports, direction), and the warning clues and good signs the app already found.
+Judge each program as "safe", "suspicious" or "dangerous".
 - Well-known, properly signed software running from its normal folder is usually safe, even if it talks to many servers.
 - Programs in Temp, Downloads or hidden folders, unsigned files, fake Windows names, hidden or encoded commands, hacker or remote-control ports, and Tor/proxy IPs raise suspicion.
 - Be calm and accurate. Only say "dangerous" when there are real signs.
@@ -169,7 +169,7 @@ Reply with ONLY this JSON, no markdown and no other text:
     final payload = [
       for (final item in items) {'id': item.id, ...item.facts},
     ];
-    final user = 'Check these ${items.length} connection(s) on my Windows PC:\n'
+    final user = 'Check these ${items.length} program(s) on my Windows PC:\n'
         '${const JsonEncoder.withIndent(' ').convert(payload)}';
     final text = await complete(config,
         system: systemPrompt, user: user, wantJson: true);
@@ -554,22 +554,22 @@ Map<String, AiVerdict> parseVerdicts(
   return out;
 }
 
-/// Plain facts about a connection, in the shape sent to the AI.
-Map<String, Object?> describeForAi(ConnectionRow row) {
+/// Plain facts about a program and its connections, in the shape sent to
+/// the AI.
+Map<String, Object?> describeGroupForAi(ProgramGroup group) {
   Map<String, Object?> clean(Map<String, Object?> m) =>
       m..removeWhere((_, v) => v == null || (v is String && v.isEmpty));
 
-  final file = row.file;
-  final geo = row.geo;
-  final c = row.connection;
-  var cmd = row.process?.commandLine;
+  final file = group.file;
+  var cmd = group.process?.commandLine;
   if (cmd != null && cmd.length > 500) cmd = '${cmd.substring(0, 500)}...';
   final created = file?.created;
 
   return clean({
     'program': clean({
-      'file': row.fileName,
-      'folder': row.folder ?? (row.isWindowsCore ? 'Windows kernel' : 'hidden by Windows'),
+      'file': group.fileName,
+      'folder': group.folder ??
+          (group.isWindowsCore ? 'Windows kernel' : 'hidden by Windows'),
       'signature': file == null ? 'not checked yet' : _signatureWords(file),
       'signedBy': file?.signer,
       'company': file?.company,
@@ -578,24 +578,29 @@ Map<String, Object?> describeForAi(ConnectionRow row) {
       'startCommand': cmd,
       'fileCreatedDaysAgo':
           created == null ? null : DateTime.now().difference(created).inDays,
+      'runningCopies': group.pids.length,
     }),
-    'connection': clean({
-      'protocol': c.protocol,
-      'state': c.state,
-      'direction': row.direction.name,
-      'localAddress': formatEndpoint(c.localAddress, c.localPort),
-      if (c.remoteAddress.isNotEmpty)
-        'remoteAddress': formatEndpoint(c.remoteAddress, c.remotePort),
-      'remoteCountry': geo?.country,
-      'remoteCity': geo?.city,
-      'remoteOwner': geo?.owner,
-      'remoteIsVpnProxyOrTor': geo?.proxy == true ? true : null,
-      'remoteIsDataCenter': geo?.hosting == true ? true : null,
-    }),
-    'appRiskScore': row.risk.score,
-    'appClues': [
-      for (final r in row.risk.reasons) '${r.title} (+${r.points}): ${r.detail}',
+    'connections': [
+      for (final r in group.rows.take(12))
+        clean({
+          'direction': r.direction.name,
+          'protocol': r.connection.protocol,
+          'state': r.connection.state,
+          'local': formatEndpoint(r.connection.localAddress, r.connection.localPort),
+          if (r.connection.remoteAddress.isNotEmpty)
+            'remote': formatEndpoint(r.connection.remoteAddress, r.connection.remotePort),
+          'remoteCountry': r.geo?.country,
+          'remoteOwner': r.geo?.owner,
+          'remoteIsVpnProxyOrTor': r.geo?.proxy == true ? true : null,
+          'remoteIsDataCenter': r.geo?.hosting == true ? true : null,
+        }),
     ],
+    if (group.rows.length > 12) 'moreConnections': group.rows.length - 12,
+    'appRiskScore': group.score,
+    'appWarningClues': [
+      for (final r in group.reasons) '${r.title} (+${r.points}): ${r.detail}',
+    ],
+    'appGoodSigns': group.goodSigns,
   });
 }
 

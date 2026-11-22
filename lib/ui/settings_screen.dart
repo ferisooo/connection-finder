@@ -37,18 +37,18 @@ class SettingsScreen extends StatelessWidget {
                   icon: Icons.auto_awesome_rounded,
                   title: 'AI helper',
                   subtitle:
-                      'Use your own AI key to get a second opinion on whether a connection is suspicious.',
+                      'Get a second opinion from your own AI. Pick the company, paste your key, done.',
                   child: _AiSettings(settings: settings, ai: ai),
                 ),
                 _Card(
                   icon: Icons.bolt_rounded,
                   title: 'Live updates',
-                  subtitle: 'How often the list refreshes by itself.',
+                  subtitle: 'How often the list updates by itself.',
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _SwitchRow(
-                        title: 'Refresh automatically',
+                        title: 'Update automatically',
                         value: settings.autoRefresh,
                         onChanged: (v) => settings.autoRefresh = v,
                       ),
@@ -67,7 +67,8 @@ class SettingsScreen extends StatelessWidget {
                                 color: settings.refreshSeconds == s
                                     ? Colors.white
                                     : AppColors.text,
-                                fontWeight: FontWeight.w600,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15,
                               ),
                               side: const BorderSide(color: AppColors.border),
                               showCheckmark: false,
@@ -80,15 +81,15 @@ class SettingsScreen extends StatelessWidget {
                 _Card(
                   icon: Icons.public_rounded,
                   title: 'IP lookup',
-                  subtitle: 'Find out which country and company each IP belongs to.',
+                  subtitle: 'Shows which country and company each internet address belongs to.',
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _SwitchRow(
-                        title: 'Look up country & owner of internet IPs',
+                        title: 'Look up country and owner',
                         subtitle:
-                            'Sends only the public IP addresses (not your files or programs) to ip-api.com, a free lookup service. '
-                            'Its free plan uses a plain, unencrypted web connection.',
+                            'Only the internet addresses are sent (never your files or programs) to ip-api.com, '
+                            'a free lookup service. Its free plan uses an unencrypted connection.',
                         value: settings.geoLookup,
                         onChanged: (v) => settings.geoLookup = v,
                       ),
@@ -101,9 +102,9 @@ class SettingsScreen extends StatelessWidget {
                   icon: Icons.tune_rounded,
                   title: 'What to show',
                   child: _SwitchRow(
-                    title: 'Show local & closing connections',
+                    title: 'Also show programs that only talk inside this PC',
                     subtitle:
-                        'Connections that stay inside this PC, plus ones that are shutting down. Usually just noise.',
+                        'These never leave your computer, so they are hidden to keep the list short.',
                     value: settings.showLocal,
                     onChanged: (v) => settings.showLocal = v,
                   ),
@@ -112,14 +113,11 @@ class SettingsScreen extends StatelessWidget {
                   icon: Icons.favorite_rounded,
                   title: 'How the warnings work',
                   child: Text(
-                    'Every connection gets a risk score from clues: a sneaky folder (Temp, Downloads, hidden Windows folders), '
-                    'no digital signature, a fake Windows name (like svch0st.exe), Windows tools that hackers misuse, hidden or '
-                    'encoded start commands, fake document names (invoice.pdf.exe), hacker / Tor / mining ports, remote-control '
-                    'doors, VPN/proxy IPs and countries you flag.\n\n'
-                    '20+ points = Suspicious (pink).  50+ points = Danger (hot pink, glowing).\n\n'
-                    'A warning is not proof of malware. When unsure, ask the AI helper, look the program up online, '
-                    'or scan it with Windows Security.',
-                    style: TextStyle(color: AppColors.muted, height: 1.5, fontSize: 13.5),
+                    'Each program gets points for warning signs, like running from a Temp or Downloads folder, '
+                    'having no digital signature, using a fake Windows name, or talking on ports hackers use.\n\n'
+                    '20 points or more: Suspicious.   50 points or more: Danger!\n\n'
+                    'A warning is a clue, not proof. When unsure, ask the AI or scan the program with Windows Security.',
+                    style: TextStyle(color: AppColors.muted, height: 1.5, fontSize: 15),
                   ),
                 ),
               ],
@@ -172,7 +170,7 @@ class _Card extends StatelessWidget {
                         style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
                     if (subtitle != null)
                       Text(subtitle!,
-                          style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+                          style: const TextStyle(color: AppColors.muted, fontSize: 15)),
                   ],
                 ),
               ),
@@ -207,11 +205,11 @@ class _SwitchRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
+              Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
               if (subtitle != null) ...[
                 const SizedBox(height: 3),
                 Text(subtitle!,
-                    style: const TextStyle(color: AppColors.muted, fontSize: 12.5, height: 1.4)),
+                    style: const TextStyle(color: AppColors.muted, fontSize: 15, height: 1.4)),
               ],
             ],
           ),
@@ -261,7 +259,7 @@ class _CountryFieldState extends State<_CountryField> {
           codes.isEmpty
               ? 'No countries flagged.'
               : 'Flagged: ${codes.join(', ')} (+25 risk points each time)',
-          style: const TextStyle(color: AppColors.faint, fontSize: 12.5),
+          style: const TextStyle(color: AppColors.muted, fontSize: 15),
         ),
       ],
     );
@@ -340,7 +338,7 @@ class _AiSettings extends StatelessWidget {
                   'Your key is stored in the Windows Credential Manager on this PC and is only sent to the AI company you pick. '
                   'Nothing is sent to the AI until you press an "Ask AI" button. Then the app sends that connection\'s IP, '
                   'program folder and file name, start command and clues.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 12.5, height: 1.45),
+                  style: TextStyle(color: AppColors.muted, fontSize: 15, height: 1.45),
                 ),
               ),
             ],
@@ -399,7 +397,7 @@ class _ApiKeyFieldState extends State<_ApiKeyField> {
                 autocorrect: false,
                 onChanged: (_) => setState(() => _dirty = true),
                 onSubmitted: (_) => _save(),
-                style: mono(14),
+                style: mono(15),
                 decoration: InputDecoration(
                   labelText: p.needsKey ? '${p.shortName} API key' : 'API key (optional)',
                   hintText: p.keyHint,
@@ -461,7 +459,7 @@ class _CustomUrlFieldState extends State<_CustomUrlField> {
     return TextField(
       controller: _text,
       onChanged: (v) => widget.settings.customUrl = v,
-      style: mono(13.5),
+      style: mono(15),
       decoration: const InputDecoration(
         labelText: 'AI server address (OpenAI-compatible chat/completions)',
         hintText: 'http://localhost:11434/v1/chat/completions',
@@ -535,7 +533,7 @@ class _ModelFieldState extends State<_ModelField> {
               child: TextField(
                 controller: _text,
                 onChanged: (v) => widget.settings.setModel(p, v),
-                style: mono(14),
+                style: mono(15),
                 decoration: InputDecoration(
                   labelText: 'Model',
                   hintText: p.defaultModel.isEmpty ? 'e.g. llama3.1' : p.defaultModel,
@@ -562,7 +560,7 @@ class _ModelFieldState extends State<_ModelField> {
         if (_error != null)
           Padding(
             padding: const EdgeInsets.only(top: 6),
-            child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12.5)),
+            child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 15)),
           ),
       ],
     );
@@ -620,7 +618,7 @@ class _ModelPickerState extends State<_ModelPicker> {
                       selectedTileColor: AppColors.pink.withValues(alpha: 0.12),
                       leading: Icon(selected ? Icons.radio_button_checked : Icons.radio_button_off,
                           color: AppColors.pink, size: 18),
-                      title: Text(m, style: mono(13.5)),
+                      title: Text(m, style: mono(15)),
                       onTap: () => Navigator.pop(context, m),
                     );
                   },
@@ -697,7 +695,7 @@ class _TestButtonState extends State<_TestButton> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(_result!,
-                      style: TextStyle(color: _ok ? AppColors.blush : AppColors.danger, fontSize: 13)),
+                      style: TextStyle(color: _ok ? AppColors.blush : AppColors.danger, fontSize: 15)),
                 ),
               ],
             ),

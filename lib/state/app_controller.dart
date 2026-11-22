@@ -1,5 +1,5 @@
 // The app's brain: scans on a timer, checks files and IPs in the background,
-// scores every connection and keeps the AI verdicts.
+// scores every connection, groups them by program and keeps the AI verdicts.
 
 import 'dart:async';
 import 'dart:io' show pid;
@@ -16,22 +16,22 @@ import '../services/scanner.dart';
 import '../services/settings.dart';
 import '../services/system_actions.dart';
 
-enum RowFilter { all, suspicious, connected, listening }
+enum ViewFilter { everything, suspicious }
 
 class Stats {
   const Stats({
     required this.connections,
-    required this.remoteIps,
     required this.programs,
-    required this.suspicious,
-    required this.dangerous,
+    required this.suspiciousPrograms,
+    required this.dangerousPrograms,
   });
 
   final int connections;
-  final int remoteIps;
   final int programs;
-  final int suspicious;
-  final int dangerous;
+  final int suspiciousPrograms;
+  final int dangerousPrograms;
+
+  int get riskyPrograms => suspiciousPrograms + dangerousPrograms;
 }
 
 /// Works out which way a connection goes.
@@ -65,10 +65,27 @@ int compareRows(ConnectionRow a, ConnectionRow b) {
   final byDir =
       _directionOrder[a.direction]!.compareTo(_directionOrder[b.direction]!);
   if (byDir != 0) return byDir;
-  final byName =
-      a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase());
-  if (byName != 0) return byName;
   return a.connection.key.compareTo(b.connection.key);
+}
+
+int compareGroups(ProgramGroup a, ProgramGroup b) {
+  final byRisk = b.score.compareTo(a.score);
+  if (byRisk != 0) return byRisk;
+  final byTalking = b.talking.length.compareTo(a.talking.length);
+  if (byTalking != 0) return byTalking;
+  return a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase());
+}
+
+/// Groups connections by the program behind them.
+List<ProgramGroup> groupByProgram(Iterable<ConnectionRow> rows) {
+  final map = <String, List<ConnectionRow>>{};
+  for (final r in rows) {
+    final key = r.path?.toLowerCase() ?? 'pid:${r.pid}';
+    map.putIfAbsent(key, () => []).add(r);
+  }
+  return [
+    for (final e in map.entries) ProgramGroup(e.key, e.value),
+  ]..sort(compareGroups);
 }
 
 class AppController extends ChangeNotifier {
@@ -88,12 +105,13 @@ class AppController extends ChangeNotifier {
   final RiskEngine engine;
   final GeoLookup geo;
 
-  static const int aiBatchSize = 8;
+  static const int aiBatchSize = 6;
   static final DateTime _longAgo = DateTime.fromMillisecondsSinceEpoch(0);
 
   ScanResult? _last;
   List<ConnectionRow> _rows = const [];
-  List<ConnectionRow>? _visibleCache;
+  List<ProgramGroup> _groups = const [];
+  List<ProgramGroup>? _visibleCache;
   bool _scanning = false;
   bool _firstScanDone = false;
   DateTime? _lastUpdated;
@@ -111,7 +129,7 @@ class AppController extends ChangeNotifier {
   int _aiBatchDone = 0;
 
   String _search = '';
-  RowFilter _filter = RowFilter.all;
+  ViewFilter _filter = ViewFilter.everything;
 
   Timer? _timer;
   bool? _timerAuto;
@@ -129,50 +147,49 @@ class AppController extends ChangeNotifier {
   bool get demoMode => _last?.demo ?? false;
   bool get usingNetstatFallback => _last?.method == 'netstat';
   String get search => _search;
-  RowFilter get filter => _filter;
-  List<ConnectionRow> get allRows => _rows;
+  ViewFilter get filter => _filter;
   bool get aiBatchRunning => _aiBatchRunning;
   int get aiBatchTotal => _aiBatchTotal;
   int get aiBatchDone => _aiBatchDone;
 
-  AiVerdict? verdictFor(ConnectionRow row) => _verdicts[row.aiKey];
-  bool isAsking(ConnectionRow row) => _aiBusy.contains(row.aiKey);
-  bool isCheckingFile(ConnectionRow row) =>
-      row.path != null && row.file == null &&
-      _inspecting.contains(row.path!.toLowerCase());
+  /// Every connection (including local ones).
+  List<ConnectionRow> get allRows => _rows;
 
-  List<ConnectionRow> get visibleRows =>
-      _visibleCache ??= _rows.where(_passesFilters).toList(growable: false);
+  /// Programs shown in the list (local ones hidden unless asked for).
+  List<ProgramGroup> get groups => _groups;
 
-  Stats get stats {
-    final base = _rows.where(_passesLocalFilter).toList();
-    return Stats(
-      connections: base.length,
-      remoteIps: base
-          .map((r) => r.connection.remoteAddress)
-          .where(isPublicIp)
-          .toSet()
-          .length,
-      programs:
-          base.map((r) => (r.path ?? r.fileName).toLowerCase()).toSet().length,
-      suspicious:
-          base.where((r) => r.risk.level == RiskLevel.suspicious).length,
-      dangerous: base.where((r) => r.risk.level == RiskLevel.dangerous).length,
-    );
-  }
-
-  /// Risky connections the AI hasn't judged yet (one per program+place).
-  List<ConnectionRow> get pendingAiRows {
-    final seen = <String>{};
-    final out = <ConnectionRow>[];
-    for (final r in _rows.where(_passesLocalFilter)) {
-      if (r.risk.level == RiskLevel.safe) continue;
-      final v = _verdicts[r.aiKey];
-      if (v != null && !v.isError) continue;
-      if (seen.add(r.aiKey)) out.add(r);
+  ProgramGroup? groupByKey(String key) {
+    for (final g in _groups) {
+      if (g.key == key) return g;
     }
-    return out;
+    return null;
   }
+
+  AiVerdict? verdictFor(ProgramGroup g) => _verdicts[g.key];
+  bool isAsking(ProgramGroup g) => _aiBusy.contains(g.key);
+  bool isCheckingFile(ProgramGroup g) =>
+      g.path != null && g.file == null &&
+      _inspecting.contains(g.path!.toLowerCase());
+
+  List<ProgramGroup> get visibleGroups =>
+      _visibleCache ??= _groups.where(_passesFilters).toList(growable: false);
+
+  Stats get stats => Stats(
+        connections: _groups.fold(0, (n, g) => n + g.rows.length),
+        programs: _groups.length,
+        suspiciousPrograms:
+            _groups.where((g) => g.level == RiskLevel.suspicious).length,
+        dangerousPrograms:
+            _groups.where((g) => g.level == RiskLevel.dangerous).length,
+      );
+
+  /// Risky programs the AI hasn't judged yet.
+  List<ProgramGroup> get pendingAiGroups => [
+        for (final g in _groups)
+          if (g.level != RiskLevel.safe &&
+              (_verdicts[g.key] == null || _verdicts[g.key]!.isError))
+            g,
+      ];
 
   // ---- filters -----------------------------------------------------------
 
@@ -183,7 +200,7 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  set filter(RowFilter value) {
+  set filter(ViewFilter value) {
     if (value == _filter) return;
     _filter = value;
     _visibleCache = null;
@@ -202,42 +219,32 @@ class AppController extends ChangeNotifier {
     return true;
   }
 
-  bool _passesFilters(ConnectionRow r) {
-    if (!_passesLocalFilter(r)) return false;
-    switch (_filter) {
-      case RowFilter.all:
-        break;
-      case RowFilter.suspicious:
-        if (r.risk.level == RiskLevel.safe) return false;
-      case RowFilter.connected:
-        if (r.direction != Direction.outgoing &&
-            r.direction != Direction.incoming) {
-          return false;
-        }
-      case RowFilter.listening:
-        if (r.direction != Direction.listening) return false;
+  bool _passesFilters(ProgramGroup g) {
+    if (_filter == ViewFilter.suspicious && g.level == RiskLevel.safe) {
+      return false;
     }
     final q = _search.trim().toLowerCase();
     if (q.isEmpty) return true;
-    final c = r.connection;
-    final haystack = <String?>[
-      r.fileName,
-      r.path,
-      c.remoteAddress,
-      '${c.remotePort}',
-      '${c.localPort}',
-      c.state,
-      c.protocol,
-      'pid ${r.pid}',
-      r.geo?.country,
-      r.geo?.countryCode,
-      r.geo?.city,
-      r.geo?.owner,
-      r.file?.signer,
-      r.file?.company,
-      r.file?.product,
-    ];
-    return haystack.any((s) => s != null && s.toLowerCase().contains(q));
+    bool has(String? s) => s != null && s.toLowerCase().contains(q);
+    if (has(g.fileName) ||
+        has(g.path) ||
+        has(g.file?.signer) ||
+        has(g.file?.company) ||
+        has(g.file?.product)) {
+      return true;
+    }
+    for (final r in g.rows) {
+      final c = r.connection;
+      if (has(c.remoteAddress) ||
+          has('${c.remotePort}') ||
+          has('${c.localPort}') ||
+          has(r.geo?.country) ||
+          has(r.geo?.city) ||
+          has(r.geo?.owner)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // ---- scanning ----------------------------------------------------------
@@ -344,6 +351,7 @@ class AppController extends ChangeNotifier {
     _firstSeen.removeWhere((key, _) => !seen.contains(key));
     rows.sort(compareRows);
     _rows = rows;
+    _groups = groupByProgram(rows.where(_passesLocalFilter));
     _visibleCache = null;
   }
 
@@ -404,20 +412,21 @@ class AppController extends ChangeNotifier {
 
   // ---- AI helper ----------------------------------------------------------
 
-  /// Asks the AI about one connection. Returns a message to show, or null.
-  Future<String?> askAi(ConnectionRow row) async {
+  /// Asks the AI about one program. Returns a message to show, or null.
+  Future<String?> askAi(ProgramGroup group) async {
     if (!settings.aiReady) {
-      return 'Add your AI key in Settings first (the gear button, top right).';
+      return 'First add your AI key in Settings.';
     }
-    final key = row.aiKey;
+    final key = group.key;
     if (_aiBusy.contains(key)) return null;
     _aiBusy.add(key);
     notifyListeners();
     final config = settings.aiConfig;
     try {
-      final res = await ai.analyze(config, [AiItem('c1', describeForAi(row))]);
-      _verdicts[key] = res['c1'] ??
-          AiVerdict.failed("The AI didn't answer about this connection.",
+      final res =
+          await ai.analyze(config, [AiItem('p1', describeGroupForAi(group))]);
+      _verdicts[key] = res['p1'] ??
+          AiVerdict.failed("The AI didn't answer about this program.",
               provider: config.provider.shortName, model: config.model);
     } on AiException catch (e) {
       _verdicts[key] = AiVerdict.failed(e.message,
@@ -432,16 +441,16 @@ class AppController extends ChangeNotifier {
     return null;
   }
 
-  /// Asks the AI about every risky connection it hasn't judged yet.
+  /// Asks the AI about every risky program it hasn't judged yet.
   Future<void> askAiAboutPending() async {
     if (_aiBatchRunning || !settings.aiReady) return;
-    final rows = pendingAiRows;
-    if (rows.isEmpty) return;
+    final groups = pendingAiGroups;
+    if (groups.isEmpty) return;
 
     _aiBatchRunning = true;
-    _aiBatchTotal = rows.length;
+    _aiBatchTotal = groups.length;
     _aiBatchDone = 0;
-    _aiBusy.addAll(rows.map((r) => r.aiKey));
+    _aiBusy.addAll(groups.map((g) => g.key));
     notifyListeners();
 
     final config = settings.aiConfig;
@@ -449,45 +458,46 @@ class AppController extends ChangeNotifier {
         provider: config.provider.shortName, model: config.model);
 
     try {
-      for (var i = 0; i < rows.length; i += aiBatchSize) {
-        final chunk = rows.sublist(i, math.min(i + aiBatchSize, rows.length));
+      for (var i = 0; i < groups.length; i += aiBatchSize) {
+        final chunk =
+            groups.sublist(i, math.min(i + aiBatchSize, groups.length));
         final items = [
           for (var j = 0; j < chunk.length; j++)
-            AiItem('c${j + 1}', describeForAi(chunk[j])),
+            AiItem('p${j + 1}', describeGroupForAi(chunk[j])),
         ];
         try {
           final res = await ai.analyze(config, items);
           for (var j = 0; j < chunk.length; j++) {
-            _verdicts[chunk[j].aiKey] =
-                res['c${j + 1}'] ?? fail('The AI skipped this one. Try again.');
+            _verdicts[chunk[j].key] =
+                res['p${j + 1}'] ?? fail('The AI skipped this one. Try again.');
           }
         } on AiException catch (e) {
           // Problems like a wrong key affect every request, so stop here.
-          for (final r in rows.sublist(i)) {
-            _verdicts[r.aiKey] = fail(e.message);
+          for (final g in groups.sublist(i)) {
+            _verdicts[g.key] = fail(e.message);
           }
           break;
         } catch (e) {
-          for (final r in chunk) {
-            _verdicts[r.aiKey] = fail('Something went wrong: $e');
+          for (final g in chunk) {
+            _verdicts[g.key] = fail('Something went wrong: $e');
           }
         }
         _aiBatchDone += chunk.length;
-        _aiBusy.removeAll(chunk.map((r) => r.aiKey));
+        _aiBusy.removeAll(chunk.map((g) => g.key));
         if (_disposed) return;
         notifyListeners();
       }
     } finally {
       _aiBatchRunning = false;
-      _aiBusy.removeAll(rows.map((r) => r.aiKey));
+      _aiBusy.removeAll(groups.map((g) => g.key));
       if (!_disposed) notifyListeners();
     }
   }
 
   // ---- actions --------------------------------------------------------------
 
-  Future<ActionResult> revealInExplorer(ConnectionRow row) {
-    final path = row.path;
+  Future<ActionResult> revealInExplorer(ProgramGroup group) {
+    final path = group.path;
     if (path == null) {
       return Future.value(const ActionResult(false,
           'Windows is hiding this folder. Try "Restart as admin".'));
@@ -495,13 +505,28 @@ class AppController extends ChangeNotifier {
     return actions.revealInExplorer(path);
   }
 
-  Future<ActionResult> stopProgram(ConnectionRow row) async {
-    final result = await actions.killProcess(row.pid);
-    if (result.ok) {
-      await Future<void>.delayed(const Duration(milliseconds: 400));
-      unawaited(refresh());
+  /// Stops every running copy of the program.
+  Future<ActionResult> stopProgram(ProgramGroup group) async {
+    final pids = group.pids.where((p) => p > 4 && p != pid).toList();
+    if (pids.isEmpty) {
+      return const ActionResult(false, "This one can't be stopped.");
     }
-    return result;
+    var last = const ActionResult(true, 'Program stopped.');
+    var stopped = 0;
+    for (final p in pids) {
+      final r = await actions.killProcess(p);
+      if (r.ok) {
+        stopped++;
+      } else {
+        last = r;
+      }
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    unawaited(refresh());
+    if (stopped == pids.length) {
+      return const ActionResult(true, 'Program stopped.');
+    }
+    return last;
   }
 
   Future<bool> relaunchAsAdmin() => actions.relaunchAsAdmin();

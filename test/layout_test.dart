@@ -1,5 +1,6 @@
 // Makes sure the screens fit at the smallest window size (960 x 640) without
-// anything overflowing. Uses real fonts so text widths are realistic.
+// anything overflowing, and that every piece of text is at least 15px.
+// Uses real fonts so text widths are realistic.
 
 import 'dart:io';
 
@@ -10,7 +11,9 @@ import 'package:connection_finder/services/settings.dart';
 import 'package:connection_finder/state/app_controller.dart';
 import 'package:connection_finder/theme.dart';
 import 'package:connection_finder/ui/details_dialog.dart';
+import 'package:connection_finder/ui/home_screen.dart';
 import 'package:connection_finder/ui/settings_screen.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -20,9 +23,10 @@ String? _flutterRoot() {
   final env = Platform.environment['FLUTTER_ROOT'];
   if (env != null && Directory(env).existsSync()) return env;
   var dir = File(Platform.resolvedExecutable).parent;
+  final sep = Platform.pathSeparator;
   for (var i = 0; i < 7; i++) {
-    if (Directory('${dir.path}${Platform.pathSeparator}bin').existsSync() &&
-        Directory('${dir.path}${Platform.pathSeparator}packages${Platform.pathSeparator}flutter').existsSync()) {
+    if (Directory('${dir.path}${sep}bin').existsSync() &&
+        Directory('${dir.path}${sep}packages${sep}flutter').existsSync()) {
       return dir.path;
     }
     dir = dir.parent;
@@ -42,6 +46,34 @@ Future<bool> _loadFont(String family, List<String> files) async {
   }
   if (any) await loader.load();
   return any;
+}
+
+/// Every visible piece of text smaller than 15px (icons don't count).
+List<String> textsUnder15(WidgetTester tester) {
+  final out = <String>[];
+  for (final p in tester.allRenderObjects.whereType<RenderParagraph>()) {
+    void visit(InlineSpan span, TextStyle? inherited) {
+      final style = inherited?.merge(span.style) ?? span.style;
+      if (span is TextSpan) {
+        final family = style?.fontFamily ?? '';
+        final size = style?.fontSize;
+        final text = span.text;
+        if (text != null &&
+            text.trim().isNotEmpty &&
+            !family.contains('MaterialIcons') &&
+            size != null &&
+            size < 15) {
+          out.add('"${text.trim()}" is ${size}px');
+        }
+        for (final child in span.children ?? const <InlineSpan>[]) {
+          visit(child, style);
+        }
+      }
+    }
+
+    visit(p.text, null);
+  }
+  return out.toSet().toList();
 }
 
 void main() {
@@ -81,7 +113,25 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
-  testWidgets('home and details fit in the smallest window', (tester) async {
+  Future<void> settle(WidgetTester tester) async {
+    await tester.pump();
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+  }
+
+  testWidgets('the 15px checker really catches small text', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: buildTheme(),
+      home: const Column(children: [
+        Text('big enough'),
+        Text('tiny', style: TextStyle(fontSize: 12)),
+      ]),
+    ));
+    expect(textsUnder15(tester), ['"tiny" is 12.0px']);
+  });
+
+  testWidgets('home, details and help fit and use 15px+ text', (tester) async {
     if (!fontsReady) {
       markTestSkipped('fonts not found');
       return;
@@ -89,11 +139,10 @@ void main() {
     smallWindow(tester);
     final controller = await makeController();
     await tester.pumpWidget(ConnectionFinderApp(controller: controller));
-    for (var i = 0; i < 6; i++) {
-      await tester.pump(const Duration(milliseconds: 50));
-    }
-    expect(controller.visibleRows, isNotEmpty);
+    await settle(tester);
+    expect(controller.visibleGroups, isNotEmpty);
     expect(tester.takeException(), isNull);
+    expect(textsUnder15(tester), isEmpty);
 
     // Scroll through every card so each one gets laid out.
     final list = find.byType(Scrollable).last;
@@ -101,30 +150,53 @@ void main() {
       await tester.drag(list, const Offset(0, -300));
       await tester.pump();
       expect(tester.takeException(), isNull);
+      expect(textsUnder15(tester), isEmpty);
     }
 
-    final row = controller.visibleRows.first;
-    final context = tester.element(find.byType(Scaffold).first);
-    showDialog<void>(
-      context: context,
-      builder: (_) => DetailsDialog(
-        controller: controller,
-        initialRow: row,
-        onAskAi: (_) {},
-        onOpenFolder: (_) {},
-        onCopyPath: (_) {},
-        onStop: (_) {},
-      ),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(find.byType(DetailsDialog), findsOneWidget);
+    // Only-suspicious tab.
+    controller.filter = ViewFilter.suspicious;
+    await settle(tester);
     expect(tester.takeException(), isNull);
+    controller.filter = ViewFilter.everything;
+    await settle(tester);
+
+    // Details of every program, with the technical part opened.
+    final context = tester.element(find.byType(Scaffold).first);
+    for (final group in controller.visibleGroups) {
+      showDialog<void>(
+        context: context,
+        builder: (_) => DetailsDialog(
+          controller: controller,
+          initialGroup: group,
+          onAskAi: (_) {},
+          onOpenFolder: (_) {},
+          onCopy: (_) {},
+          onStop: (_) {},
+        ),
+      );
+      await settle(tester);
+      expect(find.byType(DetailsDialog), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Technical details'), 200,
+          scrollable: find.descendant(
+              of: find.byType(DetailsDialog), matching: find.byType(Scrollable)).first);
+      await tester.tap(find.text('Technical details'));
+      await settle(tester);
+      expect(tester.takeException(), isNull, reason: group.fileName);
+      expect(textsUnder15(tester), isEmpty, reason: group.fileName);
+      Navigator.of(tester.element(find.byType(DetailsDialog))).pop();
+      await settle(tester);
+    }
+
+    // Help.
+    showDialog<void>(context: context, builder: (_) => const HelpDialog());
+    await settle(tester);
+    expect(tester.takeException(), isNull);
+    expect(textsUnder15(tester), isEmpty);
 
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('settings fit in the smallest window', (tester) async {
+  testWidgets('settings fit and use 15px+ text', (tester) async {
     if (!fontsReady) {
       markTestSkipped('fonts not found');
       return;
@@ -137,8 +209,14 @@ void main() {
         theme: buildTheme(),
         home: SettingsScreen(settings: controller.settings, ai: controller.ai),
       ));
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(tester.takeException(), isNull);
+      await settle(tester);
+      final list = find.byType(Scrollable).first;
+      for (var i = 0; i < 8; i++) {
+        expect(tester.takeException(), isNull);
+        expect(textsUnder15(tester), isEmpty);
+        await tester.drag(list, const Offset(0, -300));
+        await tester.pump();
+      }
     }
     await tester.pumpWidget(const SizedBox());
     controller.dispose();

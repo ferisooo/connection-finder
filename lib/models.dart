@@ -124,6 +124,7 @@ class FileInfo {
     this.description,
     this.created,
     this.size,
+    this.checkError,
   });
 
   final String path;
@@ -135,6 +136,9 @@ class FileInfo {
   final String? description;
   final DateTime? created;
   final int? size;
+
+  /// Why the signature couldn't be checked (for troubleshooting).
+  final String? checkError;
 
   bool get isSigned => signature == SignatureStatus.valid;
 }
@@ -208,13 +212,19 @@ class RiskAssessment {
   const RiskAssessment({
     required this.score,
     this.reasons = const [],
+    this.goodSigns = const [],
     this.notes = const [],
   });
 
   static const safeScore = RiskAssessment(score: 0);
 
   final int score;
+
+  /// Why it looks suspicious (each clue adds points).
   final List<RiskReason> reasons;
+
+  /// Short reasons why it looks fine, like "Made by Google LLC (signed)".
+  final List<String> goodSigns;
 
   /// Friendly info lines that don't change the score.
   final List<String> notes;
@@ -307,15 +317,78 @@ class ConnectionRow {
   /// Is this Windows itself (the kernel), which has no program file?
   bool get isWindowsCore => pid == 0 || pid == 4;
 
-  /// Key used to remember the AI's verdict, so the same program talking to
-  /// the same place doesn't need to be asked about twice.
-  String get aiKey {
-    final who = (path ?? process?.name ?? 'pid$pid').toLowerCase();
-    if (direction == Direction.listening) {
-      return '$who|listen|${connection.protocol}|${connection.localPort}';
-    }
-    return '$who|${connection.remoteAddress}|${connection.remotePort}';
+}
+
+/// All connections of one program, shown as one card.
+class ProgramGroup {
+  ProgramGroup._(this.key, this.rows, this.reasons, this.score);
+
+  /// Builds a group. [rows] must all belong to the same program.
+  factory ProgramGroup(String key, List<ConnectionRow> rows) {
+    final sorted = [...rows]
+      ..sort((a, b) => b.risk.score.compareTo(a.risk.score));
+    final seen = <String>{};
+    final reasons = <RiskReason>[
+      for (final r in sorted)
+        for (final reason in r.risk.reasons)
+          if (seen.add(reason.title)) reason,
+    ]..sort((a, b) => b.points.compareTo(a.points));
+    // A program is as risky as its riskiest connection.
+    final score = sorted.first.risk.score;
+    return ProgramGroup._(key, sorted, reasons, score);
   }
+
+  /// Stable id of the program (its file path, or its process id).
+  final String key;
+
+  /// Its connections, the most worrying first.
+  final List<ConnectionRow> rows;
+
+  /// Every warning clue found for this program, biggest first.
+  final List<RiskReason> reasons;
+  final int score;
+
+  ConnectionRow get worst => rows.first;
+  RiskLevel get level => RiskAssessment.levelForScore(score);
+  String get fileName => worst.fileName;
+  String? get path => worst.path;
+  String? get folder => worst.folder;
+  ProcessInfo? get process => worst.process;
+  FileInfo? get file => worst.file;
+  bool get isWindowsCore => worst.isWindowsCore;
+
+  /// Good signs, without duplicates, from all of its connections.
+  List<String> get goodSigns {
+    final seen = <String>{};
+    return [
+      for (final r in rows)
+        for (final g in r.risk.goodSigns)
+          if (seen.add(g)) g,
+    ];
+  }
+
+  /// Info lines, without duplicates.
+  List<String> get notes {
+    final seen = <String>{};
+    return [
+      for (final r in rows)
+        for (final n in r.risk.notes)
+          if (seen.add(n)) n,
+    ];
+  }
+
+  Set<int> get pids => {for (final r in rows) r.pid};
+
+  /// Connections that go somewhere (not just waiting).
+  List<ConnectionRow> get talking =>
+      rows.where((r) => r.direction != Direction.listening).toList();
+
+  /// "Open doors": the program waiting for others to connect.
+  List<ConnectionRow> get listening =>
+      rows.where((r) => r.direction == Direction.listening).toList();
+
+  /// Shown with a "NEW" tag when the program only just started connecting.
+  bool get isNew => rows.every((r) => r.isNew);
 }
 
 /// Folder part of a Windows (or POSIX) path, without the trailing slash.

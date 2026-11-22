@@ -6,21 +6,17 @@ A pink & black Windows app that shows **which IP addresses are connected to your
 
 ## What it does
 
-- **Live list of connections.** It refreshes every few seconds (you can pause it).
-- **Program, folder and file** for every connection, for example `C:\Program Files\Google\Chrome\Application` → `chrome.exe`.
-- **Who is on the other side.** Shows the country and company that owns each internet IP.
-- **Suspicious connections glow pink.** Each one gets a risk score from clues like:
-  - running from a sneaky folder (Temp, Downloads, Recycle Bin, hidden Windows folders)
-  - no digital signature, or a broken one
-  - a fake Windows name (`svchost.exe` in the wrong folder, `svch0st.exe`)
-  - Windows tools that hackers misuse (PowerShell, mshta, certutil...) talking to the internet
-  - hidden or encoded start-up commands
-  - fake document names (`invoice.pdf.exe`)
-  - hacker, Tor, crypto-mining and remote-control ports
-  - VPN, proxy or Tor IPs, and countries you choose to flag
-  - **20+ points = Suspicious**, **50+ points = Danger!**
-- **Ask AI.** One click sends a connection's details to *your* AI using *your* API key. There is also a button that asks about all the risky ones at once.
-- **Quick actions:** open the program's folder, copy the IP or path, see all the details, or stop the program.
+- **One sentence at the top tells you what's going on.** For example: *"2 programs look dangerous. They're at the top of the list. Each card tells you why."* or *"Everything looks safe right now."*
+- **One card per program** shows its file name, the folder it runs from, and who it's talking to (IP address, country and owner).
+- **Every card answers "Is it suspicious?"**
+  - **Yes:** it lists why in plain words, for example *"Runs from a Temp folder. Temp is for throwaway files. Real apps rarely run from there."*
+  - **No:** it says why it looks safe, for example *"Made by Google LLC (signed) · Installed in Program Files · Secure connection (port 443)"*.
+- **Colors:** grey = looks safe, pink = suspicious, glowing pink = danger. 20+ warning points means suspicious, 50+ means danger.
+- **Things it checks:** sneaky folders (Temp, Downloads, Recycle Bin, hidden Windows folders), missing or broken digital signatures, fake Windows names (`svch0st.exe`), Windows tools that hackers misuse, hidden or encoded start-up commands, fake document names (`invoice.pdf.exe`), hacker / Tor / crypto-mining / remote-control ports, VPN or proxy IPs, and countries you choose to flag.
+- **Ask AI:** one click sends a program's details to *your* AI, using *your* API key, for a second opinion.
+- **Quick actions:** open the program's folder, stop the program, or open **Details**, which has everything (technical bits are tucked away at the bottom).
+- **Help** button (top right) explains everything in simple words. Text is at least 15px everywhere.
+- Updates live every few seconds. Click the **Live** pill to pause.
 
 ## Download & run (no coding needed)
 

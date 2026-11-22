@@ -70,6 +70,26 @@ void main() {
     expect(a.level, RiskLevel.safe);
   });
 
+  test('safe apps say why they look safe', () {
+    const path = r'C:\Program Files\Google\Chrome\Application\chrome.exe';
+    final a = assess(path, file: signedFile(path, signer: 'Google LLC'));
+    expect(a.goodSigns, [
+      'Made by Google LLC (signed)',
+      'Installed in Program Files',
+      'Secure connection (port 443)',
+    ]);
+  });
+
+  test('this app never flags itself', () {
+    final a = engine.assess(RiskInput(
+        connection: tcp(pid: 777, remotePort: 80),
+        direction: Direction.outgoing,
+        process: const ProcessInfo(
+            pid: 777, name: 'ConnectionFinder.exe', path: r'C:\Users\Mia\Downloads\ConnectionFinder.exe'),
+        selfPid: 777));
+    expect(a.score, 0);
+  });
+
   test('real svchost in System32 is safe', () {
     const path = r'C:\Windows\System32\svchost.exe';
     final a = assess(path, file: signedFile(path));
@@ -108,7 +128,7 @@ void main() {
         file: signedFile(path, signer: 'Microsoft Windows'),
         cmd: 'powershell.exe -NoP -W Hidden -Enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA');
     expect(a.level, RiskLevel.dangerous);
-    expect(titles(a), containsAll(['Windows tool talking to the internet', 'Sneaky start-up command']));
+    expect(titles(a), containsAll(['Windows tool using the internet', 'Sneaky start-up command']));
   });
 
   test('PowerShell running a normal script is only suspicious', () {
@@ -142,7 +162,7 @@ void main() {
         conn: tcp(remote: '81.2.69.160', remotePort: 51515, localPort: 3389),
         direction: Direction.incoming,
         file: signedFile(path));
-    expect(titles(a), contains('Someone is remote-accessing your PC'));
+    expect(titles(a), contains('Remote access from the internet'));
     expect(a.level, isNot(RiskLevel.safe));
   });
 
@@ -153,7 +173,7 @@ void main() {
         geo: const GeoInfo(
             ip: '142.250.80.46', country: 'Narnia', countryCode: 'NA', proxy: true),
         flagged: {'NA'});
-    expect(titles(a), containsAll(['VPN / proxy / Tor address', 'Flagged country: Narnia']));
+    expect(titles(a), containsAll(['Hidden behind a VPN or Tor', 'Flagged country: Narnia']));
     expect(a.score, 45);
   });
 
@@ -161,7 +181,7 @@ void main() {
     final a = engine.assess(RiskInput(
         connection: tcp(pid: 4, remotePort: 4444), direction: Direction.outgoing));
     expect(a.score, 0);
-    expect(a.notes, isNotEmpty);
+    expect(a.goodSigns, ['Part of Windows itself']);
   });
 
   test('hidden folder is a note, not points', () {
@@ -213,5 +233,33 @@ void main() {
       expect(formatEndpoint('1.2.3.4', 80), '1.2.3.4:80');
       expect(formatEndpoint('::1', 80), '[::1]:80');
     });
+  });
+
+  test('connections are grouped into one card per program', () {
+    ConnectionRow row(String path, int pid, String remote, {int port = 443}) {
+      final c = tcp(pid: pid, remote: remote, remotePort: port);
+      final p = ProcessInfo(pid: pid, name: fileNameOf(path), path: path);
+      return ConnectionRow(
+        connection: c,
+        process: p,
+        direction: Direction.outgoing,
+        firstSeen: DateTime(2020),
+        risk: engine.assess(RiskInput(connection: c, direction: Direction.outgoing, process: p, now: now)),
+      );
+    }
+
+    const chrome = r'C:\Program Files\Google\Chrome\Application\chrome.exe';
+    const bad = r'C:\Users\Mia\AppData\Local\Temp\svch0st.exe';
+    final groups = groupByProgram([
+      row(chrome, 10, '142.250.80.46'),
+      row(chrome, 11, '142.250.72.110'),
+      row(bad, 20, '185.220.101.47', port: 9001),
+    ]);
+    expect(groups, hasLength(2));
+    expect(groups.first.fileName, 'svch0st.exe', reason: 'riskiest first');
+    expect(groups.first.level, RiskLevel.dangerous);
+    expect(groups.last.rows, hasLength(2));
+    expect(groups.last.pids, {10, 11});
+    expect(groups.last.level, RiskLevel.safe);
   });
 }

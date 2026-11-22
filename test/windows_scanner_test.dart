@@ -37,7 +37,8 @@ void main() {
     final infos = await WindowsScanner().inspectFiles([svchost, missing]);
     final info = infos[svchost]!;
     // ignore: avoid_print
-    print('svchost: sig=${info.signature} signer=${info.signer} company=${info.company}');
+    print('svchost: sig=${info.signature} signer=${info.signer} '
+        'company=${info.company} error=${info.checkError}');
     expect(info.exists, isTrue);
     expect(info.signature, SignatureStatus.valid);
     expect(info.signer, isNotNull);

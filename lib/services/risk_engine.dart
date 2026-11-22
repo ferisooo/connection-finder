@@ -1,5 +1,6 @@
 // Decides how suspicious a connection looks, using simple, explainable clues.
 // Every clue adds points; 20+ points = suspicious, 50+ points = dangerous.
+// It also lists the good signs, so the app can say why something looks safe.
 
 import 'dart:math' as math;
 
@@ -90,32 +91,33 @@ const Map<String, int> abusedWindowsTools = {
   'msiexec.exe': 10,
 };
 
-/// Ports that are commonly used by hacking tools, botnets, Tor or miners.
+/// Ports often used by hacking tools, botnets, Tor or crypto miners.
+/// The text completes the sentence "Port N is ...".
 const Map<int, (String, int)> suspiciousPorts = {
-  4444: ('a port used by the Metasploit hacking tool', 25),
-  4445: ('a port used by hacking tools', 20),
+  4444: ('used by the Metasploit hacking tool', 25),
+  4445: ('used by hacking tools', 20),
   1337: ('a well-known "hacker" port', 25),
-  31337: ('the "elite hacker" port used by old trojans', 30),
-  12345: ('a port used by the NetBus trojan', 25),
-  54321: ('a port used by old trojans', 20),
-  6666: ('IRC chat, often used to control hacked PCs', 25),
-  6667: ('IRC chat, often used to control hacked PCs', 25),
-  6668: ('IRC chat, often used to control hacked PCs', 25),
-  6669: ('IRC chat, often used to control hacked PCs', 25),
-  6697: ('IRC chat, often used to control hacked PCs', 20),
-  1080: ('a SOCKS proxy port that relays traffic', 15),
-  3128: ('a proxy port that relays traffic', 10),
-  9001: ('a Tor network port (hides who you talk to)', 30),
-  9030: ('a Tor network port (hides who you talk to)', 30),
-  9050: ('a Tor network port (hides who you talk to)', 30),
-  9051: ('a Tor network port (hides who you talk to)', 30),
-  9150: ('a Tor network port (hides who you talk to)', 30),
-  3333: ('a port used by crypto-mining pools', 25),
-  5555: ('a port used by crypto-mining pools and remote debugging', 20),
-  7777: ('a port used by crypto-mining pools', 20),
-  14444: ('a port used by crypto-mining pools', 25),
-  14433: ('a port used by crypto-mining pools', 25),
-  45700: ('a port used by crypto-mining pools', 25),
+  31337: ('the "elite hacker" port of old trojans', 30),
+  12345: ('used by the NetBus trojan', 25),
+  54321: ('used by old trojans', 20),
+  6666: ('IRC chat, used to control hacked PCs', 25),
+  6667: ('IRC chat, used to control hacked PCs', 25),
+  6668: ('IRC chat, used to control hacked PCs', 25),
+  6669: ('IRC chat, used to control hacked PCs', 25),
+  6697: ('IRC chat, used to control hacked PCs', 20),
+  1080: ('a proxy that passes traffic along', 15),
+  3128: ('a proxy that passes traffic along', 10),
+  9001: ('used by the Tor network to hide traffic', 30),
+  9030: ('used by the Tor network to hide traffic', 30),
+  9050: ('used by the Tor network to hide traffic', 30),
+  9051: ('used by the Tor network to hide traffic', 30),
+  9150: ('used by the Tor network to hide traffic', 30),
+  3333: ('used by crypto-mining pools', 25),
+  5555: ('used by crypto-mining pools', 20),
+  7777: ('used by crypto-mining pools', 20),
+  14444: ('used by crypto-mining pools', 25),
+  14433: ('used by crypto-mining pools', 25),
+  45700: ('used by crypto-mining pools', 25),
   23: ('Telnet, an old unencrypted remote login', 20),
 };
 
@@ -141,6 +143,7 @@ final RegExp _personalFolder =
 final RegExp _tempFolder = RegExp(r'\\(temp|tmp)\\');
 final RegExp _oddRoot =
     RegExp(r'^[a-z]:\\?$|^[a-z]:\\programdata$|^[a-z]:\\users\\[^\\]+$');
+final RegExp _programFiles = RegExp(r'^[a-z]:\\program files( \(x86\))?\\');
 final RegExp _fakeDocument = RegExp(
     r'\.(pdf|docx?|xlsx?|pptx?|txt|rtf|jpe?g|png|gif|mp[34]|mov|avi|zip|rar|7z)\.(exe|scr|com|bat|cmd|pif|vbs|js)$');
 final RegExp _oddProgramType = RegExp(r'\.(scr|pif|com)$');
@@ -165,20 +168,18 @@ class RiskEngine {
   RiskAssessment assess(RiskInput input) {
     final conn = input.connection;
     if (conn.pid == 0 || conn.pid == 4) {
-      return const RiskAssessment(
-        score: 0,
-        notes: ['This is Windows itself (the system core). It has no program file.'],
-      );
+      return const RiskAssessment(score: 0, goodSigns: ['Part of Windows itself']);
     }
-
     if (input.selfPid != null && conn.pid == input.selfPid) {
       return const RiskAssessment(
         score: 0,
-        notes: ['This is Connection Finder itself (looking up IPs or asking your AI).'],
+        goodSigns: ['This is Connection Finder itself'],
+        notes: ['Connection Finder uses the internet to look up IPs and to ask your AI.'],
       );
     }
 
     final reasons = <RiskReason>[];
+    final good = <String>[];
     final notes = <String>[];
     void add(ReasonKind kind, String title, String detail, int points) =>
         reasons.add(RiskReason(
@@ -205,54 +206,60 @@ class RiskEngine {
     if (path == null || path.isEmpty) {
       notes.add(input.isAdmin
           ? "Windows wouldn't share this program's folder."
-          : 'Folder hidden by Windows. Use "Restart as admin" to see it.');
+          : 'Windows hides this folder. Use "Restart as admin" to see it.');
     }
 
     // 1. Sneaky folders --------------------------------------------------
     if (path != null && path.isNotEmpty) {
       if (folderSlash.contains(r'\$recycle.bin\')) {
         add(ReasonKind.folder, 'Hiding in the Recycle Bin',
-            "Programs never run from the Recycle Bin. It's a classic malware hiding spot.", 60);
+            'Real programs never run from the Recycle Bin.', 60);
       } else if (_tempFolder.hasMatch(folderSlash)) {
         add(ReasonKind.folder, 'Runs from a Temp folder',
-            'Temp folders are for throwaway files. Real apps rarely run from there, but malware often does.', 40);
+            'Temp is for throwaway files. Real apps rarely run from there.', 40);
       } else if (folderSlash.contains(r'\users\public\')) {
         add(ReasonKind.folder, 'Runs from the Public folder',
-            'The shared Public folder is a favorite hiding place for malware.', 30);
+            'A shared folder that malware likes to hide in.', 30);
       } else if (folderSlash.contains(r'\downloads\')) {
         add(ReasonKind.folder, 'Runs from Downloads',
-            'This program runs straight from your Downloads folder instead of being installed.', 25);
+            'It was never installed. It runs straight from Downloads.', 25);
       } else if (_hiddenWindowsFolder.hasMatch(folder)) {
         add(ReasonKind.folder, 'Hiding inside a Windows folder',
-            'This Windows folder normally holds no programs. Malware hides here to look official.', 35);
+            'This Windows folder normally has no programs in it.', 35);
       } else if (_personalFolder.hasMatch(folderSlash)) {
         add(ReasonKind.folder, 'Runs from a personal folder',
-            'Programs usually live in Program Files, not in Desktop, Documents or Pictures.', 15);
+            'Apps normally live in Program Files, not Desktop or Documents.', 15);
       } else if (_oddRoot.hasMatch(folder)) {
         add(ReasonKind.folder, 'Odd location',
-            'Sitting loose at the top of a drive or user folder is unusual for real apps.', 25);
+            'Real apps rarely sit loose at the top of a drive.', 25);
       } else if (folderSlash.contains(r'\appdata\roaming\')) {
         add(ReasonKind.folder, 'Runs from AppData\\Roaming',
-            "Some real apps live here, but it's also a popular malware hideout.", 10);
+            'Some real apps live here, but malware likes it too.', 10);
+      } else if (inWindowsFolder) {
+        good.add('In the Windows system folder');
+      } else if (_programFiles.hasMatch(folderSlash)) {
+        good.add('Installed in Program Files');
       }
     }
 
     // 2. Digital signature ---------------------------------------------
     if (file != null && file.exists) {
       switch (file.signature) {
+        case SignatureStatus.valid:
+          final maker = file.signer ?? file.company;
+          good.insert(0, maker == null ? 'Digitally signed' : 'Made by $maker (signed)');
         case SignatureStatus.notSigned:
           add(ReasonKind.signature, 'No digital signature',
-              "Real companies usually sign their programs so you know who made them. This one isn't signed by anyone.", 25);
+              'No company vouches for who made it.', 25);
         case SignatureStatus.hashMismatch:
           add(ReasonKind.signature, 'Broken signature',
-              'The file was changed after it was signed. It may have been tampered with.', 60);
+              'The file was changed after it was signed.', 60);
         case SignatureStatus.notTrusted:
           add(ReasonKind.signature, 'Untrusted signature',
-              "It's signed, but by someone Windows doesn't trust.", 30);
+              "It's signed by someone Windows doesn't trust.", 30);
         case SignatureStatus.unknownError:
           add(ReasonKind.signature, 'Signature problem',
-              "Windows couldn't confirm who made this program (self-made or expired certificate).", 20);
-        case SignatureStatus.valid:
+              "Windows couldn't confirm who made it.", 20);
         case SignatureStatus.notSupported:
         case SignatureStatus.unknown:
           break;
@@ -266,7 +273,7 @@ class RiskEngine {
         !inWindowsFolder &&
         !folderSlash.contains(r'\windowsapps\')) {
       add(ReasonKind.file, 'Program file is gone',
-          'The program is running but its file was deleted or moved. Malware does this to hide.', 30);
+          'Its file was deleted while it runs. Malware does this to hide.', 30);
     }
     final created = file?.created;
     if (created != null && !signed && file!.exists) {
@@ -278,7 +285,7 @@ class RiskEngine {
                 ? '${age.inHours} hours'
                 : '${age.inDays} days';
         add(ReasonKind.file, 'Brand-new program',
-            "This file appeared on your PC $when ago and isn't signed.", 10);
+            "It appeared on your PC $when ago and isn't signed.", 10);
       }
     }
 
@@ -289,13 +296,13 @@ class RiskEngine {
           path.isNotEmpty &&
           !inWindowsFolder) {
         add(ReasonKind.disguise, 'Pretends to be a Windows file',
-            '"$rawName" is a Windows system file name, but the real one lives in C:\\Windows\\System32. This copy is somewhere else.',
+            'The real "$rawName" lives in C:\\Windows\\System32, not here.',
             signed ? 35 : 70);
       } else {
         final twin = lookAlikeWindowsName(base);
         if (twin != null) {
           add(ReasonKind.disguise, 'Name looks like a Windows file',
-              '"$rawName" looks a lot like "$twin", a real Windows file. That is a common trick to blend in.',
+              '"$rawName" looks like "$twin". A trick to blend in.',
               signed ? 10 : 45);
         }
       }
@@ -305,13 +312,13 @@ class RiskEngine {
     final toolPoints = abusedWindowsTools[name];
     if (toolPoints != null) {
       if (remoteIsPublic) {
-        add(ReasonKind.tool, 'Windows tool talking to the internet',
-            '"$rawName" is a built-in Windows tool that hackers often misuse to download or run bad things.',
+        add(ReasonKind.tool, 'Windows tool using the internet',
+            'Hackers often misuse "$rawName" to download bad things.',
             toolPoints);
       } else if (input.direction == Direction.listening &&
           !isLoopback(conn.localAddress)) {
         add(ReasonKind.tool, 'Windows tool waiting for connections',
-            '"$rawName" is waiting for other computers to connect to it, which is unusual.',
+            '"$rawName" waiting for others to connect is unusual.',
             toolPoints);
       }
     }
@@ -326,60 +333,66 @@ class RiskEngine {
     ];
     if (hits.isNotEmpty) {
       add(ReasonKind.command, 'Sneaky start-up command',
-          'The command that started it ${_joinNice(hits)}.',
+          'It was started with a command that ${_joinNice(hits)}.',
           hits.length >= 3 ? 40 : 30);
     }
 
     // 7. Tricky file names -----------------------------------------------
     if (_fakeDocument.hasMatch(name)) {
       add(ReasonKind.file, 'Fake document name',
-          '"$rawName" pretends to be a document or picture, but it is really a program.', 50);
+          '"$rawName" pretends to be a document, but it is a program.', 50);
     } else if (_oddProgramType.hasMatch(name)) {
       add(ReasonKind.file, 'Unusual program type',
-          'Screensaver (.scr), .pif and .com files rarely need the internet. Malware uses them to look harmless.', 30);
+          '.scr, .pif and .com files rarely need the internet.', 30);
     }
     if (!signed && looksRandomName(base)) {
       add(ReasonKind.file, 'Random-looking name',
-          '"$rawName" looks like a random jumble of letters. Malware often uses names like this.', 15);
+          'Malware often uses jumbled names like this.', 15);
     }
 
     // 8. Ports and direction ---------------------------------------------
     switch (input.direction) {
       case Direction.outgoing:
-        if (remoteIsPublic) {
-          final port = suspiciousPorts[conn.remotePort];
-          if (port != null) {
-            add(ReasonKind.port, 'Suspicious port ${conn.remotePort}',
-                'It talks on port ${conn.remotePort}: ${port.$1}.', port.$2);
-          }
-          if (const {135, 139, 445}.contains(conn.remotePort)) {
-            add(ReasonKind.network, 'File sharing over the internet',
-                'Windows file sharing (port ${conn.remotePort}) should never go out to the internet.', 25);
-          }
-        }
       case Direction.incoming:
+        final incoming = input.direction == Direction.incoming;
         if (remoteIsPublic) {
-          final door = remoteAccessPorts[conn.localPort];
+          final door = incoming ? remoteAccessPorts[conn.localPort] : null;
           if (door != null) {
-            add(ReasonKind.network, 'Someone is remote-accessing your PC',
-                "A computer on the internet is connected to your $door door (port ${conn.localPort}). If you didn't set this up, disconnect!",
+            add(ReasonKind.network, 'Remote access from the internet',
+                "Someone is connected to your $door. If that isn't you, stop it!",
                 40);
-          } else if (!signed) {
+          } else if (incoming && !signed) {
             add(ReasonKind.network, 'Someone outside connected in',
-                'A computer on the internet connected in to this program.', 15);
+                'A computer on the internet connected to this program.', 15);
           }
-          final port = suspiciousPorts[conn.localPort];
+          final port = suspiciousPorts[incoming ? conn.localPort : conn.remotePort];
           if (port != null) {
-            add(ReasonKind.port, 'Suspicious port ${conn.localPort}',
-                'Outsiders reach it on port ${conn.localPort}: ${port.$1}.', port.$2);
+            final n = incoming ? conn.localPort : conn.remotePort;
+            add(ReasonKind.port, 'Suspicious port $n', 'Port $n is ${port.$1}.', port.$2);
           }
+          if (!incoming && const {135, 139, 445}.contains(conn.remotePort)) {
+            add(ReasonKind.network, 'File sharing over the internet',
+                'Windows file sharing should never go out to the internet.', 25);
+          }
+          final webPort = incoming ? conn.localPort : conn.remotePort;
+          if (webPort == 443) {
+            good.add('Secure connection (port 443)');
+          } else if (webPort == 80) {
+            good.add('Normal web traffic (port 80)');
+          } else if (webPort == 53) {
+            good.add('Website name lookup (DNS)');
+          }
+        } else if (remote.isNotEmpty) {
+          good.add('Talks to your home network');
         }
       case Direction.listening:
-        if (!isLoopback(conn.localAddress)) {
+        if (isLoopback(conn.localAddress)) {
+          good.add('Only this PC can connect');
+        } else {
           final port = suspiciousPorts[conn.localPort];
           if (port != null) {
             add(ReasonKind.port, 'Waiting on port ${conn.localPort}',
-                'It keeps port ${conn.localPort} open: ${port.$1}.', port.$2);
+                'Port ${conn.localPort} is ${port.$1}.', port.$2);
           }
           final door = remoteAccessPorts[conn.localPort];
           if (door != null) {
@@ -390,10 +403,11 @@ class RiskEngine {
               !inWindowsFolder &&
               isUnspecified(conn.localAddress)) {
             add(ReasonKind.network, 'Open door to everyone',
-                "It's waiting for anyone on your network to connect to it.", 15);
+                'Anyone on your network can connect to it.', 15);
           }
         }
       case Direction.local:
+        good.add('Stays inside your PC');
       case Direction.other:
         break;
     }
@@ -402,22 +416,24 @@ class RiskEngine {
     final geo = input.geo;
     if (geo != null) {
       if (geo.proxy) {
-        add(ReasonKind.network, 'VPN / proxy / Tor address',
-            'The other computer belongs to a VPN, proxy or Tor service, which hides who is really behind it.', 20);
+        add(ReasonKind.network, 'Hidden behind a VPN or Tor',
+            'The other side hides who it really is.', 20);
       }
       final code = geo.countryCode?.toUpperCase();
       if (code != null && input.flaggedCountries.contains(code)) {
         add(ReasonKind.country, 'Flagged country: ${geo.country ?? code}',
-            'You asked to be warned about connections to ${geo.country ?? code}.', 25);
+            'You asked to be warned about ${geo.country ?? code}.', 25);
       }
       if (geo.hosting && geo.owner != null) {
         notes.add('The other computer is in a data center (${geo.owner}).');
       }
     }
 
+    if (reasons.isEmpty && good.isEmpty) good.add('No warning signs found');
     reasons.sort((a, b) => b.points.compareTo(a.points));
     final score = math.min(100, reasons.fold<int>(0, (s, r) => s + r.points));
-    return RiskAssessment(score: score, reasons: reasons, notes: notes);
+    return RiskAssessment(
+        score: score, reasons: reasons, goodSigns: good, notes: notes);
   }
 }
 

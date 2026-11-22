@@ -1,5 +1,7 @@
 // The pink & black look of Connection Finder.
 
+import 'dart:math' as math;
+
 import 'package:material_ui/material_ui.dart';
 
 import 'models.dart';
@@ -82,13 +84,14 @@ ThemeData buildTheme() {
     canvasColor: AppColors.panel,
     splashFactory: InkSparkle.splashFactory,
   );
-  final label = base.textTheme.labelLarge ?? const TextStyle();
-  final body = base.textTheme.bodyMedium ?? const TextStyle();
+  final textTheme = atLeast15(base.textTheme).apply(
+    bodyColor: AppColors.text,
+    displayColor: AppColors.text,
+  );
+  final label = textTheme.labelLarge ?? const TextStyle();
+  final body = textTheme.bodyMedium ?? const TextStyle();
   return base.copyWith(
-    textTheme: base.textTheme.apply(
-      bodyColor: AppColors.text,
-      displayColor: AppColors.text,
-    ),
+    textTheme: textTheme,
     iconTheme: const IconThemeData(color: AppColors.softPink),
     dividerTheme:
         const DividerThemeData(color: AppColors.borderSoft, thickness: 1),
@@ -98,25 +101,26 @@ ThemeData buildTheme() {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: AppColors.border),
       ),
-      textStyle: body.copyWith(color: AppColors.text, fontSize: 12),
+      textStyle: body.copyWith(color: AppColors.text, fontSize: 15),
       waitDuration: const Duration(milliseconds: 400),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       backgroundColor: AppColors.cardHigh,
-      contentTextStyle: body.copyWith(color: AppColors.text, fontSize: 14),
+      contentTextStyle: body.copyWith(color: AppColors.text, fontSize: 15),
       actionTextColor: AppColors.pink,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
         side: const BorderSide(color: AppColors.pink, width: 1),
       ),
-      width: 520,
+      width: 560,
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: AppColors.panel,
       hintStyle: const TextStyle(color: AppColors.faint),
-      helperStyle: const TextStyle(color: AppColors.faint, fontSize: 12),
+      helperStyle: const TextStyle(color: AppColors.muted, fontSize: 15),
+      errorStyle: const TextStyle(color: AppColors.danger, fontSize: 15),
       labelStyle: const TextStyle(color: AppColors.muted),
       floatingLabelStyle: const TextStyle(color: AppColors.pink),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
@@ -142,7 +146,7 @@ ThemeData buildTheme() {
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        textStyle: label.copyWith(fontWeight: FontWeight.w600, fontSize: 14),
+        textStyle: label.copyWith(fontWeight: FontWeight.w700, fontSize: 15),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
@@ -150,6 +154,7 @@ ThemeData buildTheme() {
         foregroundColor: AppColors.softPink,
         side: const BorderSide(color: AppColors.border),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        textStyle: label.copyWith(fontWeight: FontWeight.w700, fontSize: 15),
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
@@ -157,6 +162,7 @@ ThemeData buildTheme() {
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
         foregroundColor: AppColors.softPink,
+        textStyle: label.copyWith(fontWeight: FontWeight.w700, fontSize: 15),
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
@@ -191,5 +197,28 @@ ThemeData buildTheme() {
         side: const BorderSide(color: AppColors.border),
       ),
     ),
+  );
+}
+
+/// Makes every text style in [t] at least 15px, as the app's minimum.
+TextTheme atLeast15(TextTheme t) {
+  TextStyle? fix(TextStyle? s) =>
+      s?.copyWith(fontSize: math.max(15, s.fontSize ?? 15));
+  return t.copyWith(
+    displayLarge: fix(t.displayLarge),
+    displayMedium: fix(t.displayMedium),
+    displaySmall: fix(t.displaySmall),
+    headlineLarge: fix(t.headlineLarge),
+    headlineMedium: fix(t.headlineMedium),
+    headlineSmall: fix(t.headlineSmall),
+    titleLarge: fix(t.titleLarge),
+    titleMedium: fix(t.titleMedium),
+    titleSmall: fix(t.titleSmall),
+    bodyLarge: fix(t.bodyLarge),
+    bodyMedium: fix(t.bodyMedium),
+    bodySmall: fix(t.bodySmall),
+    labelLarge: fix(t.labelLarge),
+    labelMedium: fix(t.labelMedium),
+    labelSmall: fix(t.labelSmall),
   );
 }

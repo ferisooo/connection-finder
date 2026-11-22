@@ -122,13 +122,21 @@ void main() {
     for (var i = 0; i < 6; i++) {
       await tester.pump(const Duration(milliseconds: 50));
     }
-    final rows = controller.visibleRows;
+    final groups = controller.visibleGroups;
     await tester.runAsync(() async {
-      await controller.askAi(rows.firstWhere((r) => r.fileName == 'svch0st.exe'));
-      await controller.askAi(rows.firstWhere((r) => r.fileName == 'powershell.exe'));
+      await controller.askAi(groups.firstWhere((g) => g.fileName == 'svch0st.exe'));
     });
     await settle(tester);
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('screenshots/home.png'));
+    await tester.pumpWidget(const SizedBox());
+  }, skip: !enabled);
+
+  testWidgets('home screen, whole list', (tester) async {
+    setWindow(tester, height: 3000);
+    final controller = await makeController();
+    await tester.pumpWidget(ConnectionFinderApp(controller: controller));
+    await settle(tester);
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('screenshots/home_full.png'));
     await tester.pumpWidget(const SizedBox());
   }, skip: !enabled);
 
@@ -139,17 +147,17 @@ void main() {
     for (var i = 0; i < 6; i++) {
       await tester.pump(const Duration(milliseconds: 50));
     }
-    final row = controller.visibleRows.firstWhere((r) => r.fileName == 'svch0st.exe');
-    await tester.runAsync(() => controller.askAi(row));
+    final group = controller.visibleGroups.firstWhere((g) => g.fileName == 'svch0st.exe');
+    await tester.runAsync(() => controller.askAi(group));
     final context = tester.element(find.byType(Scaffold).first);
     showDialog<void>(
       context: context,
       builder: (_) => DetailsDialog(
         controller: controller,
-        initialRow: row,
+        initialGroup: group,
         onAskAi: (_) {},
         onOpenFolder: (_) {},
-        onCopyPath: (_) {},
+        onCopy: (_) {},
         onStop: (_) {},
       ),
     );

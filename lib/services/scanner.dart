@@ -98,12 +98,31 @@ class WindowsScanner implements ConnectionScanner {
   }
 }
 
+String _systemRoot() =>
+    Platform.environment['SystemRoot'] ??
+    Platform.environment['windir'] ??
+    r'C:\Windows';
+
 String _powerShellExe() {
-  final root = Platform.environment['SystemRoot'] ??
-      Platform.environment['windir'] ??
-      r'C:\Windows';
-  final full = '$root\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+  final full =
+      '${_systemRoot()}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
   return File(full).existsSync() ? full : 'powershell.exe';
+}
+
+/// The environment for Windows PowerShell. PSModulePath is reset to Windows
+/// PowerShell's own folders: if the app was started from PowerShell 7, the
+/// inherited path would make Windows PowerShell load the wrong modules.
+Map<String, String> _powerShellEnvironment(Map<String, String>? extra) {
+  final env = <String, String>{};
+  Platform.environment.forEach((key, value) {
+    if (key.toUpperCase() != 'PSMODULEPATH') env[key] = value;
+  });
+  final programFiles =
+      Platform.environment['ProgramFiles'] ?? r'C:\Program Files';
+  env['PSModulePath'] = '$programFiles\\WindowsPowerShell\\Modules;'
+      '${_systemRoot()}\\System32\\WindowsPowerShell\\v1.0\\Modules';
+  if (extra != null) env.addAll(extra);
+  return env;
 }
 
 List<int> _utf16le(String s) {
@@ -134,7 +153,8 @@ Future<String> runPowerShell(
         '-EncodedCommand',
         base64.encode(_utf16le(script)),
       ],
-      environment: environment,
+      environment: _powerShellEnvironment(environment),
+      includeParentEnvironment: false,
     );
   } on ProcessException catch (e) {
     throw ScanException('Could not start PowerShell: ${e.message}');
@@ -225,10 +245,12 @@ const String inspectScript = r'''
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'
 try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}
+$security = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1'
+if (Test-Path -LiteralPath $security) { Import-Module $security -ErrorAction SilentlyContinue }
 $list = ([string]$env:CF_PATHS) -split '\|' | Where-Object { $_ -ne '' }
 $out = New-Object System.Collections.Generic.List[object]
 foreach ($p in $list) {
-  $o = [ordered]@{ path = [string]$p; exists = $false; sig = 'Unknown'; signer = ''; company = ''; product = ''; desc = ''; created = ''; size = 0 }
+  $o = [ordered]@{ path = [string]$p; exists = $false; sig = 'Unknown'; signer = ''; company = ''; product = ''; desc = ''; created = ''; size = 0; err = '' }
   try {
     if (Test-Path -LiteralPath $p -PathType Leaf) {
       $o.exists = $true
@@ -241,15 +263,23 @@ foreach ($p in $list) {
         $o.product = [string]$v.ProductName
         $o.desc = [string]$v.FileDescription
       }
-      $s = Get-AuthenticodeSignature -LiteralPath $p
-      if ($s) {
-        $o.sig = [string]$s.Status
-        if ($s.SignerCertificate) {
-          $o.signer = $s.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+      try {
+        $s = Get-AuthenticodeSignature -LiteralPath $p -ErrorAction Stop
+        if ($s) {
+          $o.sig = [string]$s.Status
+          if ($s.SignerCertificate) {
+            $o.signer = $s.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+          }
+        } else {
+          $o.err = 'no signature result'
         }
+      } catch {
+        $o.err = [string]$_.Exception.Message
       }
     }
-  } catch {}
+  } catch {
+    $o.err = [string]$_.Exception.Message
+  }
   $out.Add($o)
 }
 $json = ConvertTo-Json -InputObject $out.ToArray() -Depth 3 -Compress
@@ -437,6 +467,7 @@ Map<String, FileInfo> parseInspectJson(String raw) {
       description: _str(item['desc']),
       created: created == null ? null : DateTime.tryParse(created),
       size: _int(item['size']) == 0 ? null : _int(item['size']),
+      checkError: _str(item['err']),
     );
   }
   return out;

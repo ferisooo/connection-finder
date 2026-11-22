@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/services.dart';
 // Settings: the AI helper (provider, key, model), live updates, IP lookup.
 
 import 'package:material_ui/material_ui.dart';
@@ -359,30 +362,79 @@ class _ApiKeyField extends StatefulWidget {
   State<_ApiKeyField> createState() => _ApiKeyFieldState();
 }
 
+/// Removes things people often copy along with a key: spaces, line breaks,
+/// quotes and a "Bearer " prefix.
+String cleanApiKey(String raw) {
+  var k = raw.trim();
+  if (k.toLowerCase().startsWith('bearer ')) k = k.substring(7);
+  k = k.replaceAll(RegExp(r'''[\s"'`]'''), '');
+  return k;
+}
+
+/// Shows a key as "sk-ab…7890" so people can see it was saved.
+String maskApiKey(String k) {
+  if (k.length <= 10) return '•' * k.length;
+  return '${k.substring(0, 5)}…${k.substring(k.length - 4)}';
+}
+
 class _ApiKeyFieldState extends State<_ApiKeyField> {
   late final TextEditingController _text =
       TextEditingController(text: widget.settings.keyFor(widget.provider));
   bool _show = false;
-  bool _dirty = false;
+  Timer? _saveTimer;
 
   @override
   void dispose() {
+    // Save anything typed in the last moment before leaving the page.
+    if (_saveTimer?.isActive ?? false) {
+      _saveTimer!.cancel();
+      widget.settings.setApiKey(widget.provider, cleanApiKey(_text.text));
+    }
     _text.dispose();
     super.dispose();
   }
 
+  void _onChanged(String _) {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 400), _save);
+  }
+
   Future<void> _save() async {
-    await widget.settings.setApiKey(widget.provider, _text.text);
+    final key = cleanApiKey(_text.text);
+    if (key != _text.text) {
+      _text.value = TextEditingValue(
+          text: key, selection: TextSelection.collapsed(offset: key.length));
+    }
+    await widget.settings.setApiKey(widget.provider, key);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _paste() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
     if (!mounted) return;
-    setState(() => _dirty = false);
-    showToast(context,
-        _text.text.trim().isEmpty ? 'Key removed.' : '${widget.provider.shortName} key saved safely.');
+    if (text == null || cleanApiKey(text).isEmpty) {
+      showToast(context, 'Nothing to paste. Copy your key first, then click "Paste key".',
+          ok: false);
+      return;
+    }
+    _saveTimer?.cancel();
+    _text.text = cleanApiKey(text);
+    await _save();
+    if (mounted) showToast(context, '${widget.provider.shortName} key saved.');
+  }
+
+  Future<void> _clear() async {
+    _saveTimer?.cancel();
+    _text.clear();
+    await _save();
+    if (mounted) showToast(context, 'Key removed.');
   }
 
   @override
   Widget build(BuildContext context) {
     final p = widget.provider;
-    final saved = widget.settings.hasKey(p) && !_dirty;
+    final saved = widget.settings.keyFor(p);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -395,7 +447,7 @@ class _ApiKeyFieldState extends State<_ApiKeyField> {
                 obscureText: !_show,
                 enableSuggestions: false,
                 autocorrect: false,
-                onChanged: (_) => setState(() => _dirty = true),
+                onChanged: _onChanged,
                 onSubmitted: (_) => _save(),
                 style: mono(15),
                 decoration: InputDecoration(
@@ -415,21 +467,39 @@ class _ApiKeyFieldState extends State<_ApiKeyField> {
             SizedBox(
               height: 50,
               child: FilledButton.icon(
-                onPressed: _dirty ? _save : null,
-                icon: Icon(saved ? Icons.check_rounded : Icons.save_rounded, size: 18),
-                label: Text(saved ? 'Saved' : 'Save key'),
+                onPressed: _paste,
+                icon: const Icon(Icons.content_paste_rounded, size: 20),
+                label: const Text('Paste key'),
               ),
             ),
           ],
         ),
-        if (p.keyPage.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: TextButton.icon(
-              onPressed: () => const SystemActions().openUrl(p.keyPage),
-              icon: const Icon(Icons.open_in_new_rounded, size: 16),
-              label: Text('Get a ${p.shortName} key  (${p.keyPage.replaceFirst('https://', '')})'),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Icon(saved.isEmpty ? Icons.info_outline_rounded : Icons.check_circle_rounded,
+                size: 18, color: saved.isEmpty ? AppColors.muted : AppColors.pink),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                saved.isEmpty
+                    ? (p.needsKey
+                        ? 'No key yet. Copy your key, then click "Paste key". It saves by itself.'
+                        : 'No key needed for most local AIs.')
+                    : 'Saved: ${maskApiKey(saved)}',
+                style: TextStyle(
+                    color: saved.isEmpty ? AppColors.muted : AppColors.blush, fontSize: 15),
+              ),
             ),
+            if (saved.isNotEmpty)
+              TextButton(onPressed: _clear, child: const Text('Remove key')),
+          ],
+        ),
+        if (p.keyPage.isNotEmpty)
+          TextButton.icon(
+            onPressed: () => const SystemActions().openUrl(p.keyPage),
+            icon: const Icon(Icons.open_in_new_rounded, size: 18),
+            label: Text('Get a ${p.shortName} key  (${p.keyPage.replaceFirst('https://', '')})'),
           ),
       ],
     );

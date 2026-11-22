@@ -18,6 +18,12 @@ class RiskInput {
     this.isAdmin = true,
     this.selfPid,
     this.now,
+    this.ancestors = const [],
+    this.autostarts = const [],
+    this.autostartIsNew = false,
+    this.repeat,
+    this.firstSeenRecently = false,
+    this.badAddress = false,
   });
 
   final NetConnection connection;
@@ -34,7 +40,99 @@ class RiskInput {
   /// AI services, which is expected).
   final int? selfPid;
   final DateTime? now;
+
+  /// The programs that started this one: parent first, then grandparent...
+  final List<ProcessInfo> ancestors;
+
+  /// Ways this program starts by itself with Windows.
+  final List<AutostartEntry> autostarts;
+
+  /// One of those entries was added recently.
+  final bool autostartIsNew;
+
+  /// It keeps contacting this address on a timer.
+  final RepeatInfo? repeat;
+
+  /// Connection Finder saw this program on the network for the first time
+  /// in the last day.
+  final bool firstSeenRecently;
+
+  /// The other side is on a public list of addresses reported for attacks.
+  final bool badAddress;
 }
+
+/// Apps that open documents. They should not start command tools.
+const Map<String, String> documentApps = {
+  'winword.exe': 'Word',
+  'excel.exe': 'Excel',
+  'powerpnt.exe': 'PowerPoint',
+  'outlook.exe': 'Outlook',
+  'onenote.exe': 'OneNote',
+  'msaccess.exe': 'Access',
+  'mspub.exe': 'Publisher',
+  'visio.exe': 'Visio',
+  'wordpad.exe': 'WordPad',
+  'acrord32.exe': 'Adobe Reader',
+  'acrobat.exe': 'Adobe Acrobat',
+  'foxitpdfreader.exe': 'Foxit PDF Reader',
+  'foxitreader.exe': 'Foxit Reader',
+  'sumatrapdf.exe': 'Sumatra PDF',
+  'soffice.bin': 'LibreOffice',
+  'soffice.exe': 'LibreOffice',
+  'thunderbird.exe': 'Thunderbird',
+};
+
+/// Apps that let someone else see and control this PC.
+const Map<String, String> remoteControlApps = {
+  'anydesk.exe': 'AnyDesk',
+  'teamviewer.exe': 'TeamViewer',
+  'teamviewer_service.exe': 'TeamViewer',
+  'tv_w32.exe': 'TeamViewer',
+  'tv_x64.exe': 'TeamViewer',
+  'rustdesk.exe': 'RustDesk',
+  'screenconnect.clientservice.exe': 'ScreenConnect',
+  'screenconnect.windowsclient.exe': 'ScreenConnect',
+  'logmein.exe': 'LogMeIn',
+  'lmiguardiansvc.exe': 'LogMeIn',
+  'srserver.exe': 'Splashtop',
+  'srservice.exe': 'Splashtop',
+  'strwinclt.exe': 'Splashtop',
+  'remoting_host.exe': 'Chrome Remote Desktop',
+  'tvnserver.exe': 'TightVNC',
+  'winvnc.exe': 'UltraVNC',
+  'winvnc4.exe': 'RealVNC',
+  'vncserver.exe': 'RealVNC',
+  'rserver3.exe': 'Radmin',
+  'aa_v3.exe': 'Ammyy Admin',
+  'supremo.exe': 'Supremo',
+  'supremoservice.exe': 'Supremo',
+  'dwagent.exe': 'DWService',
+  'dwagsvc.exe': 'DWService',
+  'client32.exe': 'NetSupport Manager',
+  'ateraagent.exe': 'Atera',
+  'meshagent.exe': 'MeshCentral',
+  'zaservice.exe': 'Zoho Assist',
+  'getscreen.exe': 'Getscreen',
+  'hoptodesk.exe': 'HopToDesk',
+  'rutserv.exe': 'Remote Utilities',
+  'rfusclient.exe': 'Remote Utilities',
+  'quickassist.exe': 'Quick Assist',
+  'msra.exe': 'Windows Remote Assistance',
+  'parsecd.exe': 'Parsec',
+};
+
+/// Words in an IP owner's name that mean "remote-control service".
+const Map<String, String> remoteControlOwners = {
+  'teamviewer': 'TeamViewer',
+  'anydesk': 'AnyDesk',
+  'logmein': 'LogMeIn',
+  'splashtop': 'Splashtop',
+  'rustdesk': 'RustDesk',
+  'screenconnect': 'ScreenConnect',
+  'connectwise': 'ScreenConnect',
+  'realvnc': 'RealVNC',
+  'ngrok': 'ngrok',
+};
 
 /// Real Windows programs that malware likes to copy the name of.
 const Set<String> windowsSystemNames = {
@@ -195,6 +293,8 @@ class RiskEngine {
     final folderSlash = '$folder\\';
     final file = input.file;
     final signed = file?.isSigned ?? false;
+    // Checked, and nobody vouches for it.
+    final knownUnsigned = file != null && !signed;
     final cmd = ' ${(input.process?.commandLine ?? '').toLowerCase()} ';
     final remote = conn.remoteAddress;
     final remoteIsPublic = remote.isNotEmpty && isPublicIp(remote);
@@ -288,6 +388,12 @@ class RiskEngine {
             "It appeared on your PC $when ago and isn't signed.", 10);
       }
     }
+    if (input.firstSeenRecently &&
+        knownUnsigned &&
+        !reasons.any((r) => r.title == 'Brand-new program')) {
+      add(ReasonKind.file, 'New on your network',
+          "Connection Finder hadn't seen this program go online before today.", 10);
+    }
 
     // 4. Fake / look-alike Windows names --------------------------------
     if (name.isNotEmpty) {
@@ -337,6 +443,70 @@ class RiskEngine {
           hits.length >= 3 ? 40 : 30);
     }
 
+    // 6b. Who started it ----------------------------------------------------
+    if (!documentApps.containsKey(name)) {
+      final chain = input.ancestors.take(4).toList();
+      final docAt =
+          chain.indexWhere((a) => documentApps.containsKey(a.fileName.toLowerCase()));
+      if (docAt >= 0) {
+        final doc = documentApps[chain[docAt].fileName.toLowerCase()]!;
+        final selfIsTool = abusedWindowsTools.containsKey(name);
+        String? toolBetween;
+        for (final a in chain.take(docAt)) {
+          if (abusedWindowsTools.containsKey(a.fileName.toLowerCase())) {
+            toolBetween = a.fileName;
+            break;
+          }
+        }
+        if (selfIsTool) {
+          add(ReasonKind.behavior, 'Started by a document app',
+              '$doc started "$rawName", which then used the network. Documents should never do that. It often means a booby-trapped file.',
+              45);
+        } else if (toolBetween != null) {
+          add(ReasonKind.behavior, 'Started by a document app',
+              '$doc started "$toolBetween", which started this program. Documents should never do that. It often means a booby-trapped file.',
+              45);
+        } else if (knownUnsigned) {
+          add(ReasonKind.behavior, 'Started by $doc',
+              "$doc started this unsigned program. Documents normally don't start programs.",
+              30);
+        }
+      }
+    }
+
+    // 6c. Starts by itself with Windows --------------------------------------
+    if (input.autostarts.isNotEmpty) {
+      final e = input.autostarts.first;
+      final how = 'a ${e.where} entry called "${e.shortName}"';
+      if (abusedWindowsTools.containsKey(name) && e.kind != 'service') {
+        add(ReasonKind.startup, 'Windows tool set to start by itself',
+            'Every time Windows starts, $how runs "$rawName". Normal apps rarely do that.',
+            25);
+      } else if (knownUnsigned && !inWindowsFolder) {
+        if (input.autostartIsNew) {
+          add(ReasonKind.startup, 'Just set itself to start with Windows',
+              'It was recently added to start every time you turn on your PC ($how). Malware does this to come back after a restart.',
+              25);
+        } else {
+          add(ReasonKind.startup, 'Starts by itself with Windows',
+              "It runs every time you turn on your PC ($how) and isn't signed.",
+              10);
+        }
+      }
+    }
+
+    // 6d. Remote control -----------------------------------------------------
+    final remoteApp = remoteControlApps[name];
+    final onNetwork = input.direction == Direction.outgoing ||
+        input.direction == Direction.incoming ||
+        (input.direction == Direction.listening &&
+            !isLoopback(conn.localAddress));
+    if (remoteApp != null && onNetwork) {
+      add(ReasonKind.remote, 'Remote-control app is running',
+          '$remoteApp lets another person see and control this PC. Fine if you set it up yourself. If a stranger asked you to install it, stop it now.',
+          20);
+    }
+
     // 7. Tricky file names -----------------------------------------------
     if (_fakeDocument.hasMatch(name)) {
       add(ReasonKind.file, 'Fake document name',
@@ -374,6 +544,17 @@ class RiskEngine {
             add(ReasonKind.network, 'File sharing over the internet',
                 'Windows file sharing should never go out to the internet.', 25);
           }
+          // Keeps calling the same address on a timer.
+          final repeat = input.repeat;
+          if (!incoming && repeat != null) {
+            if (knownUnsigned) {
+              add(ReasonKind.network, 'Calls the same address like clockwork',
+                  'It contacted $remote ${repeat.count} times, about every ${repeat.seconds} seconds. Malware "phones home" on a timer like this, though some updaters do too.',
+                  15);
+            } else {
+              notes.add('It contacts $remote about every ${repeat.seconds} seconds. Many normal apps do this.');
+            }
+          }
           final webPort = incoming ? conn.localPort : conn.remotePort;
           if (webPort == 443) {
             good.add('Secure connection (port 443)');
@@ -383,7 +564,14 @@ class RiskEngine {
             good.add('Website name lookup (DNS)');
           }
         } else if (remote.isNotEmpty) {
-          good.add('Talks to your home network');
+          final door = incoming ? remoteAccessPorts[conn.localPort] : null;
+          if (door != null) {
+            add(ReasonKind.remote, 'Remote access from your network',
+                "A device on your network ($remote) is connected to your $door. If that isn't you, stop it.",
+                25);
+          } else {
+            good.add('Talks to your home network');
+          }
         }
       case Direction.listening:
         if (isLoopback(conn.localAddress)) {
@@ -395,8 +583,10 @@ class RiskEngine {
                 'Port ${conn.localPort} is ${port.$1}.', port.$2);
           }
           final door = remoteAccessPorts[conn.localPort];
-          if (door != null) {
-            notes.add('$door is switched on (port ${conn.localPort} is open).');
+          if (door != null && conn.isTcp && remoteApp == null) {
+            add(ReasonKind.remote, '$door is switched on',
+                'Other computers can log in to this PC through it. If you never use it, turn it off in Windows Settings.',
+                20);
           }
           if (conn.isTcp &&
               !signed &&
@@ -435,6 +625,32 @@ class RiskEngine {
       }
       if (geo.hosting && geo.owner != null) {
         notes.add('The other computer is in a data center (${geo.owner}).');
+      }
+      // An ordinary program talking to a remote-control company.
+      final owner = geo.owner?.toLowerCase() ?? '';
+      if (remoteApp == null && owner.isNotEmpty) {
+        for (final e in remoteControlOwners.entries) {
+          if (owner.contains(e.key)) {
+            add(ReasonKind.remote, 'Talks to a remote-control service',
+                'The other side belongs to ${e.value}, a service for controlling PCs from far away. Unusual for this program.',
+                20);
+            break;
+          }
+        }
+      }
+    }
+
+    // 10. Addresses with a bad reputation ------------------------------------
+    if (input.badAddress && remote.isNotEmpty) {
+      if (input.direction == Direction.incoming) {
+        add(ReasonKind.network, 'Reported address connected in',
+            '$remote is on a public list of addresses reported for attacks, and it connected to this program.',
+            30);
+      } else if (!signed) {
+        add(ReasonKind.network, 'Talks to a reported address',
+            '$remote is on a public list of addresses reported for attacks.', 40);
+      } else {
+        notes.add('$remote is on a public list of addresses reported for attacks. The program itself is signed.');
       }
     }
 

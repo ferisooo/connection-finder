@@ -66,6 +66,7 @@ class AppSettings extends ChangeNotifier {
   bool _autoRefresh = true;
   int _refreshSeconds = 5;
   bool _geoLookup = true;
+  bool _badList = true;
   bool _showLocal = false;
   Set<String> _flaggedCountries = {};
 
@@ -78,6 +79,9 @@ class AppSettings extends ChangeNotifier {
   bool get autoRefresh => _autoRefresh;
   int get refreshSeconds => _refreshSeconds;
   bool get geoLookup => _geoLookup;
+
+  /// Warn about addresses on the public "reported for attacks" list.
+  bool get badList => _badList;
 
   /// Show connections that stay inside this PC and closing connections.
   bool get showLocal => _showLocal;
@@ -126,6 +130,7 @@ class AppSettings extends ChangeNotifier {
       final secs = p.getInt('scan.seconds') ?? 5;
       _refreshSeconds = refreshChoices.contains(secs) ? secs : 5;
       _geoLookup = p.getBool('geo.enabled') ?? true;
+      _badList = p.getBool('bad.enabled') ?? true;
       _showLocal = p.getBool('view.showLocal') ?? false;
       _flaggedCountries = (p.getStringList('geo.flagged') ?? const []).toSet();
     }
@@ -193,6 +198,12 @@ class AppSettings extends ChangeNotifier {
   set geoLookup(bool value) {
     _geoLookup = value;
     _prefs?.setBool('geo.enabled', value);
+    notifyListeners();
+  }
+
+  set badList(bool value) {
+    _badList = value;
+    _prefs?.setBool('bad.enabled', value);
     notifyListeners();
   }
 

@@ -29,9 +29,36 @@ class DemoScanner implements ConnectionScanner {
         if (demoFiles.containsKey(p)) p: demoFiles[p]!,
     };
   }
+
+  @override
+  Future<AutostartScan> autostarts() async {
+    await Future<void>.delayed(delay);
+    return const AutostartScan(
+      entries: demoAutostarts,
+      completeKinds: {'run', 'folder', 'task'},
+    );
+  }
 }
 
 GeoLookup demoGeoLookup() => OfflineGeoLookup(demoGeo);
+
+const List<AutostartEntry> demoAutostarts = [
+  AutostartEntry(
+    kind: 'run',
+    name: 'WindowsUpdateHelper',
+    command: '"$_u\\AppData\\Local\\Temp\\svch0st.exe" --silent',
+    exePath: '$_u\\AppData\\Local\\Temp\\svch0st.exe',
+    exeName: 'svch0st.exe',
+    args: '--silent',
+  ),
+  AutostartEntry(
+    kind: 'run',
+    name: 'Discord',
+    command: '"$_u\\AppData\\Local\\Discord\\app-1.0.9187\\Discord.exe"',
+    exePath: '$_u\\AppData\\Local\\Discord\\app-1.0.9187\\Discord.exe',
+    exeName: 'discord.exe',
+  ),
+];
 
 const _u = r'C:\Users\Mia';
 
@@ -87,6 +114,20 @@ final List<ProcessInfo> demoProcesses = [
     name: 'powershell.exe',
     path: r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
     commandLine: r'powershell.exe -File C:\Users\Mia\Scripts\backup.ps1',
+    parentPid: 4200,
+  ),
+  // Not on the network itself, but it started PowerShell.
+  const ProcessInfo(
+    pid: 4200,
+    name: 'WINWORD.EXE',
+    path: r'C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE',
+    parentPid: 3000,
+  ),
+  const ProcessInfo(pid: 3000, name: 'explorer.exe', path: r'C:\Windows\explorer.exe'),
+  const ProcessInfo(
+    pid: 5300,
+    name: 'AnyDesk.exe',
+    path: r'C:\Program Files (x86)\AnyDesk\AnyDesk.exe',
   ),
   const ProcessInfo(
     pid: 7788,
@@ -129,6 +170,7 @@ final List<NetConnection> demoConnections = [
   _tcp(8848, _me, 51544, '185.220.101.47', 9001),
   _tcp(10432, _me, 51602, '45.142.212.61', 4444),
   _tcp(3964, _me, 51710, '140.82.112.3', 443),
+  _tcp(5300, _me, 51640, '185.229.191.39', 443),
   _listen(7788, '0.0.0.0', 25565),
   _tcp(7788, _me, 25565, '86.12.33.4', 50411),
   _tcp(9120, _me, 51320, '142.250.80.46', 443),
@@ -229,6 +271,15 @@ final Map<String, FileInfo> demoFiles = {
     description: 'Windows PowerShell',
     created: DateTime(2025, 3, 2),
   ),
+  r'C:\Program Files (x86)\AnyDesk\AnyDesk.exe': FileInfo(
+    path: r'C:\Program Files (x86)\AnyDesk\AnyDesk.exe',
+    exists: true,
+    signature: SignatureStatus.valid,
+    signer: 'AnyDesk Software GmbH',
+    company: 'AnyDesk Software GmbH',
+    product: 'AnyDesk',
+    created: DateTime(2026, 11, 20),
+  ),
   r'C:\Games\BlockWorld\game_server.exe': FileInfo(
     path: r'C:\Games\BlockWorld\game_server.exe',
     exists: true,
@@ -257,6 +308,12 @@ const Map<String, GeoInfo> demoGeo = {
       isp: 'Artikel10 e.V.',
       proxy: true,
       hosting: true),
+  '185.229.191.39': GeoInfo(
+      ip: '185.229.191.39',
+      country: 'Germany',
+      countryCode: 'DE',
+      city: 'Stuttgart',
+      org: 'AnyDesk Software GmbH'),
   '45.142.212.61': GeoInfo(
       ip: '45.142.212.61',
       country: 'Netherlands',

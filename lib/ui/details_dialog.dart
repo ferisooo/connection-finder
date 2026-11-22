@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../models.dart';
 import '../services/ip_utils.dart';
+import '../services/system_actions.dart';
 import '../state/app_controller.dart';
 import '../theme.dart';
 import 'program_card.dart';
@@ -134,6 +135,34 @@ class DetailsDialog extends StatelessWidget {
                       _IconLine(icon: Icons.info_outline_rounded, color: AppColors.softPink, text: n),
                   ],
                 ),
+                if (level != RiskLevel.safe)
+                  _Section(
+                    title: 'What you can do',
+                    icon: Icons.lightbulb_rounded,
+                    children: [
+                      if (g.path != null)
+                        _DefenderScan(
+                            key: ValueKey('scan-${g.key}'),
+                            path: g.path!,
+                            actions: controller.actions),
+                      const _IconLine(
+                        icon: Icons.power_settings_new_rounded,
+                        color: AppColors.softPink,
+                        text: 'Don\'t recognise it? Close it with "Stop program" below.',
+                      ),
+                      const _IconLine(
+                        icon: Icons.auto_awesome_rounded,
+                        color: AppColors.softPink,
+                        text: 'Still unsure? "Ask AI" gives you a second opinion.',
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        "Connection Finder points out unusual behaviour and explains it. It doesn't remove viruses "
+                        'or block connections. Windows Security (or your antivirus) does that.',
+                        style: TextStyle(color: AppColors.faint, fontSize: 15, height: 1.4),
+                      ),
+                    ],
+                  ),
                 _Section(
                   title: 'AI opinion',
                   icon: Icons.auto_awesome_rounded,
@@ -157,6 +186,8 @@ class DetailsDialog extends StatelessWidget {
                     _Field('Signature', sigText, color: sigColor),
                     _Field('What it is', file?.description ?? file?.product),
                     _Field('Windows services', g.services.isEmpty ? null : g.services.join(', ')),
+                    _Field('Started by', _startedBy(g)),
+                    _Field('Starts with Windows', _startsWithWindows(g)),
                     _Field('Running copies', g.pids.length > 1 ? '${g.pids.length}' : null),
                     _Field('File created', _date(file?.created)),
                   ],
@@ -211,6 +242,22 @@ class DetailsDialog extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  /// "explorer.exe → WINWORD.EXE → this program".
+  static String? _startedBy(ProgramGroup g) {
+    final chain = g.startedBy.take(4).toList().reversed.toList();
+    if (chain.isEmpty) return null;
+    return '${chain.join('  →  ')}  →  this program';
+  }
+
+  static String? _startsWithWindows(ProgramGroup g) {
+    final entries = g.autostarts;
+    if (entries.isEmpty) return null;
+    final shown =
+        entries.take(3).map((e) => '${e.where} "${e.shortName}"').join(', ');
+    final more = entries.length - 3;
+    return 'Yes: $shown${more > 0 ? ' and $more more' : ''}';
   }
 
   static String? _date(DateTime? d) {
@@ -427,6 +474,79 @@ class _ConnectionLine extends StatelessWidget {
               tooltip: 'Copy IP address',
               onPressed: () => onCopy(ip),
               icon: const Icon(Icons.content_copy_rounded, size: 18, color: AppColors.faint),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A button that asks Windows Defender to check the program file, and shows
+/// what it said.
+class _DefenderScan extends StatefulWidget {
+  const _DefenderScan({super.key, required this.path, required this.actions});
+
+  final String path;
+  final SystemActions actions;
+
+  @override
+  State<_DefenderScan> createState() => _DefenderScanState();
+}
+
+class _DefenderScanState extends State<_DefenderScan> {
+  bool _busy = false;
+  DefenderResult? _result;
+
+  Future<void> _scan() async {
+    setState(() {
+      _busy = true;
+      _result = null;
+    });
+    final result = await widget.actions.scanWithDefender(widget.path);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _result = result;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = _result;
+    final color = r == null
+        ? AppColors.softPink
+        : switch (r.outcome) {
+            DefenderOutcome.clean => AppColors.safe,
+            DefenderOutcome.threat => AppColors.danger,
+            DefenderOutcome.unavailable => AppColors.muted,
+          };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _IconLine(
+            icon: Icons.shield_rounded,
+            color: AppColors.softPink,
+            text: 'Check the file for known viruses. Windows Security does the scanning.',
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 28, top: 6),
+            child: OutlinedButton.icon(
+              onPressed: _busy ? null : _scan,
+              icon: _busy
+                  ? const SizedBox(
+                      width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.shield_rounded, size: 20),
+              label: Text(_busy ? 'Scanning...' : 'Scan with Windows Security'),
+            ),
+          ),
+          if (r != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 28, top: 8),
+              child: Text(r.message,
+                  style: TextStyle(color: color, fontSize: 15, height: 1.4)),
             ),
         ],
       ),

@@ -579,6 +579,11 @@ Map<String, Object?> describeGroupForAi(ProgramGroup group) {
       'fileCreatedDaysAgo':
           created == null ? null : DateTime.now().difference(created).inDays,
       'runningCopies': group.pids.length,
+      'startedBy': group.startedBy.isEmpty ? null : group.startedBy.join(' <- '),
+      'startsWithWindows': group.autostarts.isEmpty
+          ? null
+          : [for (final e in group.autostarts.take(3)) '${e.where}: ${e.shortName}'].join('; '),
+      'windowsServices': group.services.isEmpty ? null : group.services.take(6).join(', '),
     }),
     'connections': [
       for (final r in group.rows.take(12))

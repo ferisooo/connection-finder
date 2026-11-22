@@ -147,7 +147,7 @@ void main() {
     for (var i = 0; i < 6; i++) {
       await tester.pump(const Duration(milliseconds: 50));
     }
-    final group = controller.visibleGroups.firstWhere((g) => g.fileName == 'svch0st.exe');
+    final group = controller.visibleGroups.firstWhere((g) => g.fileName == 'powershell.exe');
     await tester.runAsync(() => controller.askAi(group));
     final context = tester.element(find.byType(Scaffold).first);
     showDialog<void>(

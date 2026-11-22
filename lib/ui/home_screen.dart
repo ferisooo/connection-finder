@@ -819,8 +819,9 @@ class HelpDialog extends StatelessWidget {
               const _HelpItem(
                 icon: Icons.lightbulb_rounded,
                 title: 'Why something is suspicious',
-                text: 'Every card says why in plain words, for example a program hiding in a Temp folder, '
-                    'a program with no digital signature, or a fake Windows name.',
+                text: 'Every card says why in plain words. For example: a program hiding in a Temp folder, '
+                    'a document that starts a command tool, a remote-control app, a program that sets itself '
+                    'to start with Windows, or one that calls the same address like clockwork.',
               ),
               const _HelpItem(
                 icon: Icons.touch_app_rounded,
@@ -833,8 +834,9 @@ class HelpDialog extends StatelessWidget {
               const _HelpItem(
                 icon: Icons.favorite_rounded,
                 title: 'Good to know',
-                text: 'A warning is a clue, not proof. If you are not sure, ask the AI, search the program\'s '
-                    'name online, or scan it with Windows Security.',
+                text: 'Connection Finder points out unusual behaviour and explains it. It doesn\'t remove viruses '
+                    'or block anything: that is the job of Windows Security or your antivirus. '
+                    'A warning is a clue, not proof. In Details you can scan the file with Windows Security.',
               ),
               const SizedBox(height: 8),
               Row(

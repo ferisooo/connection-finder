@@ -62,6 +62,7 @@ class ProcessInfo {
     this.path,
     this.commandLine,
     this.parentPid,
+    this.started,
     this.services = const [],
   });
 
@@ -73,6 +74,9 @@ class ProcessInfo {
   final String? commandLine;
   final int? parentPid;
 
+  /// When the program was started.
+  final DateTime? started;
+
   /// Windows services running inside this program (friendly names).
   final List<String> services;
 
@@ -82,8 +86,71 @@ class ProcessInfo {
         path: newPath,
         commandLine: commandLine,
         parentPid: parentPid,
+        started: started,
         services: services,
       );
+
+  /// File name of the program, like `chrome.exe`.
+  String get fileName {
+    final p = path;
+    return p != null && p.isNotEmpty ? fileNameOf(p) : name;
+  }
+}
+
+/// One way a program is set to start by itself when Windows starts.
+class AutostartEntry {
+  const AutostartEntry({
+    required this.kind,
+    required this.name,
+    required this.command,
+    this.exePath,
+    this.exeName = '',
+    this.args = '',
+  });
+
+  /// `run` (startup list in the registry), `folder` (Startup folder),
+  /// `task` (scheduled task) or `service` (Windows service).
+  final String kind;
+  final String name;
+  final String command;
+
+  /// Full path of the program it starts, when known.
+  final String? exePath;
+
+  /// Lower-case file name of the program it starts.
+  final String exeName;
+
+  /// Lower-case arguments it passes to the program.
+  final String args;
+
+  /// Stable id used to remember entries between runs.
+  String get key => '$kind|$name|$command'.toLowerCase();
+
+  /// Plain words for where the entry lives.
+  String get where => switch (kind) {
+        'run' => 'Windows startup list',
+        'folder' => 'Startup folder',
+        'task' => 'scheduled task',
+        'service' => 'Windows service',
+        _ => 'startup entry',
+      };
+
+  /// Short name without the task folder, like `Updater`.
+  String get shortName {
+    final i = name.lastIndexOf('\\');
+    return i >= 0 && i < name.length - 1 ? name.substring(i + 1) : name;
+  }
+}
+
+/// A program that keeps contacting the same address on a timer.
+class RepeatInfo {
+  const RepeatInfo({required this.count, required this.seconds});
+
+  /// How many times it was seen.
+  final int count;
+
+  /// Roughly how many seconds between the contacts.
+  final int seconds;
 }
 
 /// Result of checking a program's digital signature.
@@ -196,6 +263,15 @@ enum ReasonKind {
   network,
   country,
   file,
+
+  /// How the program was started (for example by a document).
+  behavior,
+
+  /// It starts by itself with Windows.
+  startup,
+
+  /// Remote control of this PC.
+  remote,
 }
 
 /// One warning clue that adds to a connection's risk score.
@@ -294,12 +370,20 @@ class ConnectionRow {
     this.file,
     this.geo,
     this.isNew = false,
+    this.ancestors = const [],
+    this.autostarts = const [],
   });
 
   final NetConnection connection;
   final ProcessInfo? process;
   final FileInfo? file;
   final GeoInfo? geo;
+
+  /// The programs that started this one: parent first, then grandparent...
+  final List<ProcessInfo> ancestors;
+
+  /// Ways this program starts by itself with Windows.
+  final List<AutostartEntry> autostarts;
   final RiskAssessment risk;
   final Direction direction;
   final DateTime firstSeen;
@@ -383,6 +467,19 @@ class ProgramGroup {
   }
 
   Set<int> get pids => {for (final r in rows) r.pid};
+
+  /// Who started it, as file names: parent first.
+  List<String> get startedBy => [for (final a in worst.ancestors) a.fileName];
+
+  /// Ways it starts by itself with Windows, without duplicates.
+  List<AutostartEntry> get autostarts {
+    final seen = <String>{};
+    return [
+      for (final r in rows)
+        for (final e in r.autostarts)
+          if (seen.add(e.key)) e,
+    ];
+  }
 
   /// Windows services this program runs, without duplicates.
   List<String> get services {

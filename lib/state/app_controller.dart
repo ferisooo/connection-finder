@@ -6,13 +6,17 @@ import 'dart:io' show pid;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
 import '../services/ai_service.dart';
+import '../services/bad_addresses.dart';
 import '../services/geo_service.dart';
 import '../services/ip_utils.dart';
+import '../services/repeat_tracker.dart';
 import '../services/risk_engine.dart';
 import '../services/scanner.dart';
+import '../services/seen_store.dart';
 import '../services/settings.dart';
 import '../services/system_actions.dart';
 
@@ -120,7 +124,14 @@ class AppController extends ChangeNotifier {
     required this.ai,
     this.actions = const SystemActions(),
     this.engine = const RiskEngine(),
-  });
+    BadAddressList? badAddresses,
+    SharedPreferences? prefs,
+  })  : badAddresses = badAddresses ?? FixedBadAddressList(),
+        _seenPrograms = SeenStore('programs', prefs: prefs),
+        _seenAutostarts = {
+          for (final kind in const ['run', 'folder', 'task'])
+            kind: SeenStore('autostart.$kind', prefs: prefs),
+        };
 
   final AppSettings settings;
   final ConnectionScanner scanner;
@@ -128,6 +139,19 @@ class AppController extends ChangeNotifier {
   final SystemActions actions;
   final RiskEngine engine;
   final GeoLookup geo;
+
+  /// Public list of addresses reported for attacks.
+  final BadAddressList badAddresses;
+
+  /// Programs seen on the network before (to spot new ones).
+  final SeenStore _seenPrograms;
+
+  /// Startup entries seen before, per kind (to spot new ones).
+  final Map<String, SeenStore> _seenAutostarts;
+  final RepeatTracker _repeats = RepeatTracker();
+  List<AutostartEntry> _autostarts = const [];
+  DateTime? _autostartsAt;
+  bool _autostartsBusy = false;
 
   static const int aiBatchSize = 6;
   static final DateTime _longAgo = DateTime.fromMillisecondsSinceEpoch(0);
@@ -344,10 +368,13 @@ class AppController extends ChangeNotifier {
       _last = result;
       _error = null;
       _lastUpdated = DateTime.now();
+      _observe(result, _lastUpdated!);
       _rebuild();
       _firstScanDone = true;
       unawaited(_inspectNewFiles());
       unawaited(_resolveGeo());
+      unawaited(_loadAutostarts());
+      unawaited(_loadBadAddresses());
     } catch (e) {
       _error = e is ScanException ? e.message : 'Scan failed: $e';
     } finally {
@@ -356,17 +383,141 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  void _rebuild() {
-    final result = _last;
-    if (result == null) return;
-    final now = DateTime.now();
+  Duration get _scanInterval => Duration(seconds: settings.refreshSeconds);
 
+  static Map<int, Set<int>> _listeningPorts(ScanResult result) {
     final listening = <int, Set<int>>{};
     for (final c in result.connections) {
       if (c.isTcp && c.state == 'Listen') {
         listening.putIfAbsent(c.pid, () => <int>{}).add(c.localPort);
       }
     }
+    return listening;
+  }
+
+  static String _programKey(ProcessInfo? p, int pid) =>
+      p?.path?.toLowerCase() ?? p?.name.toLowerCase() ?? 'pid:$pid';
+
+  /// Remembers what was seen in a fresh scan: which programs are on the
+  /// network, and when new internet connections appear.
+  void _observe(ScanResult result, DateTime now) {
+    final listening = _listeningPorts(result);
+    final programs = <String>{};
+    final outgoing = <(String, String, String, int)>[];
+    for (final c in result.connections) {
+      final process = result.processes[c.pid];
+      final path = process?.path;
+      if (path != null) programs.add(path.toLowerCase());
+      if (directionOf(c, listening[c.pid] ?? const <int>{}) ==
+              Direction.outgoing &&
+          isPublicIp(c.remoteAddress)) {
+        outgoing.add((
+          c.key,
+          _programKey(process, c.pid),
+          c.remoteAddress,
+          c.remotePort,
+        ));
+      }
+    }
+    _seenPrograms.observe(programs, now);
+    _repeats.observe(outgoing, now, scanInterval: _scanInterval);
+  }
+
+  /// Reads what starts with Windows (every couple of minutes).
+  Future<void> _loadAutostarts() async {
+    final at = _autostartsAt;
+    if (_autostartsBusy ||
+        (at != null &&
+            DateTime.now().difference(at) < const Duration(minutes: 2))) {
+      return;
+    }
+    _autostartsBusy = true;
+    try {
+      final scan = await scanner.autostarts();
+      final now = DateTime.now();
+      _autostarts = scan.entries;
+      _autostartsAt = now;
+      for (final kind in scan.completeKinds) {
+        _seenAutostarts[kind]?.observe(
+            [for (final e in scan.entries) if (e.kind == kind) e.key], now);
+      }
+      if (_disposed) return;
+      _rebuild();
+      notifyListeners();
+    } catch (_) {
+      // Try again in a while; the other clues still work.
+      _autostartsAt = DateTime.now();
+    } finally {
+      _autostartsBusy = false;
+    }
+  }
+
+  Future<void> _loadBadAddresses() async {
+    if (!settings.badList) return;
+    final changed = await badAddresses.refresh();
+    if (changed && !_disposed) {
+      _rebuild();
+      notifyListeners();
+    }
+  }
+
+  /// The programs that started [p]: parent first, then grandparent...
+  static List<ProcessInfo> ancestorsOf(ProcessInfo? p, Map<int, ProcessInfo> all) {
+    final out = <ProcessInfo>[];
+    if (p == null) return out;
+    final seen = <int>{p.pid};
+    var cur = p;
+    while (cur.parentPid != null && out.length < 5) {
+      final parent = all[cur.parentPid!];
+      if (parent == null || !seen.add(parent.pid)) break;
+      // A "parent" that started later is a different program that got the
+      // same number after the real parent closed.
+      final ps = parent.started, cs = cur.started;
+      if (ps != null && cs != null && ps.isAfter(cs.add(const Duration(seconds: 2)))) {
+        break;
+      }
+      out.add(parent);
+      cur = parent;
+    }
+    return out;
+  }
+
+  /// The startup entries that start [p].
+  List<AutostartEntry> _autostartsFor(ProcessInfo? p, List<AutostartEntry> services) {
+    if (p == null) return const [];
+    final path = p.path?.toLowerCase();
+    final name = p.fileName.toLowerCase();
+    final cmd = (p.commandLine ?? '').toLowerCase();
+    final isTool = abusedWindowsTools.containsKey(name);
+    final out = <AutostartEntry>[];
+    for (final e in [..._autostarts, ...services]) {
+      if (isTool) {
+        // Windows' own tasks use these tools all the time. Only count an
+        // entry that runs the tool the same way this copy was started.
+        if (e.kind == 'service' || e.name.toLowerCase().startsWith(r'\microsoft\')) {
+          continue;
+        }
+        final sameTool =
+            e.exeName == name && e.args.isNotEmpty && cmd.contains(e.args);
+        final runsScript = e.exePath != null &&
+            !e.exeName.endsWith('.exe') &&
+            cmd.contains(e.exePath!.toLowerCase());
+        if (sameTool || runsScript) out.add(e);
+      } else if (path != null && e.exePath?.toLowerCase() == path) {
+        out.add(e);
+      }
+    }
+    return out;
+  }
+
+  void _rebuild() {
+    final result = _last;
+    if (result == null) return;
+    final now = DateTime.now();
+
+    final listening = _listeningPorts(result);
+    final autostartCache = <int, List<AutostartEntry>>{};
+    final ancestorCache = <int, List<ProcessInfo>>{};
 
     final rows = <ConnectionRow>[];
     final seen = <String>{};
@@ -378,6 +529,10 @@ class AppController extends ChangeNotifier {
           ? null
           : geo.cached(c.remoteAddress);
       final direction = directionOf(c, listening[c.pid] ?? const <int>{});
+      final ancestors = ancestorCache.putIfAbsent(
+          c.pid, () => ancestorsOf(process, result.processes));
+      final autostarts = autostartCache.putIfAbsent(
+          c.pid, () => _autostartsFor(process, result.services));
       final risk = engine.assess(RiskInput(
         connection: c,
         direction: direction,
@@ -388,6 +543,23 @@ class AppController extends ChangeNotifier {
         isAdmin: result.isAdmin,
         selfPid: pid,
         now: now,
+        ancestors: ancestors,
+        autostarts: autostarts,
+        autostartIsNew: autostarts.any((e) =>
+            _seenAutostarts[e.kind]
+                ?.isNew(e.key, now, const Duration(days: 7)) ??
+            false),
+        repeat: direction == Direction.outgoing
+            ? _repeats.infoFor(
+                _programKey(process, c.pid), c.remoteAddress, c.remotePort,
+                scanInterval: _scanInterval)
+            : null,
+        firstSeenRecently: path != null &&
+            _seenPrograms.isNew(
+                path.toLowerCase(), now, const Duration(hours: 24)),
+        badAddress: settings.badList &&
+            c.remoteAddress.isNotEmpty &&
+            badAddresses.contains(c.remoteAddress),
       ));
       // Everything found by the very first scan was already there when the
       // app opened, so only later arrivals get the "NEW" tag.
@@ -403,6 +575,8 @@ class AppController extends ChangeNotifier {
         direction: direction,
         firstSeen: first,
         isNew: now.difference(first) < const Duration(seconds: 60),
+        ancestors: ancestors,
+        autostarts: autostarts,
       ));
     }
     _firstSeen.removeWhere((key, _) => !seen.contains(key));

@@ -59,6 +59,9 @@ IconData reasonIcon(ReasonKind kind) => switch (kind) {
       ReasonKind.network => Icons.public_rounded,
       ReasonKind.country => Icons.flag_rounded,
       ReasonKind.file => Icons.insert_drive_file_rounded,
+      ReasonKind.behavior => Icons.account_tree_rounded,
+      ReasonKind.startup => Icons.restart_alt_rounded,
+      ReasonKind.remote => Icons.settings_remote_rounded,
     };
 
 /// Where the other side of a connection is, like "Germany · Tor exit relay".

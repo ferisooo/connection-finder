@@ -9,6 +9,15 @@ class ActionResult {
   final String message;
 }
 
+/// What Windows Defender said about one file.
+enum DefenderOutcome { clean, threat, unavailable }
+
+class DefenderResult {
+  const DefenderResult(this.outcome, this.message);
+  final DefenderOutcome outcome;
+  final String message;
+}
+
 class SystemActions {
   const SystemActions();
 
@@ -97,7 +106,53 @@ class SystemActions {
     await Process.start(target.path, const [], mode: ProcessStartMode.detached);
     return const ActionResult(true,
         'Fake virus started! It should show up as "Danger!" in a few seconds. '
-        'It stops by itself after 2 minutes.');
+        'It stops by itself after 3 minutes.');
+  }
+
+  /// Finds Windows Defender's command-line scanner.
+  String? _findDefender() {
+    final data = Platform.environment['ProgramData'] ?? r'C:\ProgramData';
+    final platform = Directory('$data\\Microsoft\\Windows Defender\\Platform');
+    try {
+      if (platform.existsSync()) {
+        final versions = platform.listSync().whereType<Directory>().toList()
+          ..sort((a, b) => b.path.compareTo(a.path));
+        for (final v in versions) {
+          final exe = File('${v.path}\\MpCmdRun.exe');
+          if (exe.existsSync()) return exe.path;
+        }
+      }
+    } catch (_) {}
+    final pf = Platform.environment['ProgramFiles'] ?? r'C:\Program Files';
+    final exe = File('$pf\\Windows Defender\\MpCmdRun.exe');
+    return exe.existsSync() ? exe.path : null;
+  }
+
+  /// Asks Windows Defender to check one file for viruses. Connection Finder
+  /// itself never scans or removes anything: that is the antivirus's job.
+  Future<DefenderResult> scanWithDefender(String path) async {
+    if (!supported) {
+      return const DefenderResult(DefenderOutcome.unavailable,
+          'This only works when the app runs on Windows.');
+    }
+    if (!File(path).existsSync()) {
+      return const DefenderResult(
+          DefenderOutcome.unavailable, "The file isn't there anymore.");
+    }
+    final exe = _findDefender();
+    if (exe == null) {
+      return const DefenderResult(DefenderOutcome.unavailable,
+          "Couldn't find Windows Defender. Scan the file with your own antivirus instead.");
+    }
+    try {
+      final r = await Process.run(
+              exe, ['-Scan', '-ScanType', '3', '-File', path])
+          .timeout(const Duration(minutes: 3));
+      return readDefenderOutput(r.exitCode, '${r.stdout}\n${r.stderr}');
+    } catch (_) {
+      return const DefenderResult(DefenderOutcome.unavailable,
+          "Windows Defender didn't answer. Right-click the file and choose \"Scan with Microsoft Defender\" instead.");
+    }
   }
 
   /// Opens a web page in the default browser.
@@ -105,4 +160,23 @@ class SystemActions {
     if (!supported || !url.startsWith('https://')) return;
     await Process.start('rundll32.exe', ['url.dll,FileProtocolHandler', url]);
   }
+}
+
+/// Turns the scanner's exit code and text into a plain answer.
+DefenderResult readDefenderOutput(int exitCode, String output) {
+  final text = output.toLowerCase();
+  if (exitCode == 0) {
+    return const DefenderResult(DefenderOutcome.clean,
+        'Windows Defender found no known virus in this file. '
+        "That's good, but a brand-new threat can still slip past, so keep the warnings in mind.");
+  }
+  final failed =
+      text.contains('failed with hr') || text.contains('cmdtool: failed');
+  if (exitCode == 2 && !failed) {
+    return const DefenderResult(DefenderOutcome.threat,
+        'Windows Defender found a threat in this file! Open Windows Security to see what it did about it.');
+  }
+  return const DefenderResult(DefenderOutcome.unavailable,
+      "Windows Defender couldn't scan the file (another antivirus may be in charge). "
+      'Right-click the file and scan it with your antivirus instead.');
 }

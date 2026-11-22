@@ -89,8 +89,8 @@ class SettingsScreen extends StatelessWidget {
                 ),
                 _Card(
                   icon: Icons.public_rounded,
-                  title: 'IP lookup',
-                  subtitle: 'Shows which country and company each internet address belongs to.',
+                  title: 'Internet addresses',
+                  subtitle: 'Who owns each address, and whether it has a bad reputation.',
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -101,6 +101,15 @@ class SettingsScreen extends StatelessWidget {
                             'a free lookup service. Its free plan uses an unencrypted connection.',
                         value: settings.geoLookup,
                         onChanged: (v) => settings.geoLookup = v,
+                      ),
+                      const SizedBox(height: 14),
+                      _SwitchRow(
+                        title: 'Warn about addresses with a bad reputation',
+                        subtitle:
+                            'Once a day, downloads a public list of addresses reported for attacks (IPsum). '
+                            'Nothing about your PC is sent.',
+                        value: settings.badList,
+                        onChanged: (v) => settings.badList = v,
                       ),
                       const SizedBox(height: 14),
                       _CountryField(settings: settings),
@@ -806,11 +815,11 @@ class _FakeVirusTestState extends State<_FakeVirusTest> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'This starts a harmless fake virus for 2 minutes. It reads nothing, logs nothing and sends nothing: '
-          'it only keeps trying to reach a test address that belongs to nobody. But it acts suspicious on purpose. '
-          'It runs from the Temp folder, has no digital signature and uses a "hacker" port.\n\n'
-          'Connection Finder should show it as "Danger!" within a few seconds. '
-          'You can stop it with "Stop program", or it quits by itself.',
+          'This starts a harmless fake virus for 3 minutes. It reads nothing, logs nothing and sends nothing: '
+          'it only keeps trying to reach test addresses that belong to nobody. But it acts suspicious on purpose. '
+          'It runs from the Temp folder, has no digital signature, uses a "hacker" port and "phones home" every 20 seconds.\n\n'
+          'Connection Finder should show it as "Danger!" within a few seconds. After about 2 minutes it should also '
+          'notice the clockwork calls. You can stop it with "Stop program", or it quits by itself.',
           style: TextStyle(color: AppColors.muted, fontSize: 15, height: 1.45),
         ),
         const SizedBox(height: 14),

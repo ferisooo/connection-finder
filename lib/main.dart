@@ -4,8 +4,10 @@
 import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/ai_service.dart';
+import 'services/bad_addresses.dart';
 import 'services/demo_data.dart';
 import 'services/geo_service.dart';
 import 'services/scanner.dart';
@@ -20,12 +22,23 @@ Future<void> main() async {
   final settings = AppSettings();
   await settings.load();
 
+  SharedPreferences? prefs;
+  try {
+    prefs = await SharedPreferences.getInstance();
+  } catch (_) {
+    // Without it the app still works; it just can't remember what is new.
+  }
+
   final onWindows = Platform.isWindows;
   final controller = AppController(
     settings: settings,
     scanner: onWindows ? WindowsScanner() : DemoScanner(),
     geo: onWindows ? IpApiGeoLookup() : demoGeoLookup(),
     ai: AiService(),
+    prefs: prefs,
+    badAddresses: onWindows
+        ? IpsumBadAddressList(cacheFile: IpsumBadAddressList.defaultCacheFile())
+        : null,
   );
 
   runApp(ConnectionFinderApp(controller: controller));

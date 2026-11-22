@@ -87,17 +87,28 @@ void main() {
       expect(process.path, isNotNull);
       expect(process.path!.toLowerCase(), endsWith('connectionfinder-fakevirus.exe'));
       final files = await scanner.inspectFiles([process.path!]);
-      final c = conns.first;
-      final risk = const RiskEngine().assess(RiskInput(
-        connection: c,
-        direction: directionOf(c, const {}),
-        process: process,
-        file: files[process.path!],
-      ));
+      // Judge all of its connections together, the way the app's card does.
+      final rows = [
+        for (final c in conns)
+          ConnectionRow(
+            connection: c,
+            process: process,
+            file: files[process.path!],
+            direction: directionOf(c, const {}),
+            firstSeen: DateTime.now(),
+            risk: const RiskEngine().assess(RiskInput(
+              connection: c,
+              direction: directionOf(c, const {}),
+              process: process,
+              file: files[process.path!],
+            )),
+          ),
+      ];
+      final group = groupByProgram(rows).single;
       // ignore: avoid_print
-      print('fake virus score ${risk.score}: ${risk.reasons.map((r) => r.title).toList()}');
-      expect(risk.level, RiskLevel.dangerous);
-      expect(risk.reasons.map((r) => r.title),
+      print('fake virus score ${group.score}: ${group.reasons.map((r) => r.title).toList()}');
+      expect(group.level, RiskLevel.dangerous);
+      expect(group.reasons.map((r) => r.title),
           containsAll(['Runs from a Temp folder', 'No digital signature', 'Suspicious port 4444']));
     } finally {
       virus.kill();

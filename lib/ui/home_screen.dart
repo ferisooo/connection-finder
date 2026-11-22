@@ -10,6 +10,7 @@ import 'package:material_ui/material_ui.dart';
 import '../models.dart';
 import '../state/app_controller.dart';
 import '../theme.dart';
+import '../version.dart';
 import 'details_dialog.dart';
 import 'program_card.dart';
 import 'settings_screen.dart';
@@ -868,12 +869,16 @@ class HelpDialog extends StatelessWidget {
                     'name online, or scan it with Windows Security.',
               ),
               const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Got it'),
-                ),
+              Row(
+                children: [
+                  const Text('Version $appVersion',
+                      style: TextStyle(color: AppColors.muted, fontSize: 15)),
+                  const Spacer(),
+                  FilledButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Got it'),
+                  ),
+                ],
               ),
             ],
           ),

@@ -2,6 +2,14 @@
 
 A pink & black Windows app that shows **which IP addresses are connected to your PC**, **which program** is behind each one (its **folder** and **file name**), and **warns you about suspicious ones**. You can also ask your own AI (ChatGPT, Claude, Gemini, DeepSeek, Grok, Mistral, OpenRouter or a local AI) for a second opinion.
 
+<p align="center">
+  <a href="https://github.com/ferisooo/connection-finder/releases/latest/download/ConnectionFinder-Setup.exe">
+    <img alt="Download for Windows" src="https://img.shields.io/badge/Download%20for%20Windows-ConnectionFinder--Setup.exe-ff4fa3?style=for-the-badge&logo=windows&logoColor=white&labelColor=111117" height="44">
+  </a>
+</p>
+
+<p align="center"><b>Click the pink button, open the file, click Install. That's it!</b></p>
+
 ![Connection Finder screenshot (demo data)](test/screenshots/home.png)
 
 ## What it does
@@ -18,15 +26,17 @@ A pink & black Windows app that shows **which IP addresses are connected to your
 - **Help** button (top right) explains everything in simple words. Text is at least 15px everywhere.
 - Updates live every few seconds. Click the **Live** pill to pause.
 
-## Download & run (no coding needed)
+## Download & install
 
-1. Open this repository on GitHub and click the **Actions** tab.
-2. Click the newest **Build Windows app** run that has a green check ✅.
-3. Scroll down to **Artifacts** and download **ConnectionFinder-Windows** (a zip file).
-4. Unzip it anywhere (for example into `Documents\Connection Finder`), and double-click **ConnectionFinder.exe**.
-5. Windows might say *"Windows protected your PC"*, because the app isn't signed by a company. Click **More info → Run anyway**.
+1. Click the pink **Download for Windows** button at the top of this page.
+2. Open the downloaded **ConnectionFinder-Setup.exe** and click **Install**.
+3. Connection Finder opens by itself. Next time, use the shortcut on your desktop or in the Start menu.
 
-**Tip:** Some programs' folders are hidden unless the app runs as administrator. Click **Restart as admin** in the app, or right-click `ConnectionFinder.exe` → **Run as administrator**.
+If Windows says *"Windows protected your PC"*, click **More info**, then **Run anyway**. It says that because the app is new and isn't signed by a company.
+
+**Tip:** to see every program's folder, click **Restart as admin** inside the app.
+
+The download always has the newest version. It updates by itself whenever changes land on `main` and all tests pass. To uninstall, use Windows Settings, Apps, like any other program.
 
 ## Setting up the AI helper
 
@@ -64,4 +74,4 @@ flutter build windows --release
 - `lib/services/geo_service.dart`: IP country/owner lookup.
 - On non-Windows computers the app shows made-up **demo data**, which is also used for the screenshots (`CF_SCREENSHOTS=1 flutter test --update-goldens test/screenshot_test.dart`).
 
-Every push builds the app on GitHub's Windows machines (`.github/workflows/build-windows.yml`). That build also runs a real connection scan as a test.
+Every push builds the app on GitHub's Windows machines (`.github/workflows/build-windows.yml`), runs all tests (including a real connection scan on Windows) and makes the installer (`windows/installer/connection_finder.iss`, Inno Setup). Pushes to `main` that pass publish the installer on the Releases page, which the download button points to.

@@ -196,13 +196,18 @@ try {
   $conns.Clear()
   $netstat = (netstat.exe -ano | Out-String)
 }
+$want = New-Object 'System.Collections.Generic.HashSet[int]'
+foreach ($c in $conns) { [void]$want.Add([int]$c.id) }
 $procs = New-Object System.Collections.Generic.List[object]
 try {
   foreach ($p in @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)) {
+    # Only programs that own a connection are needed (all of them for netstat).
+    if ($method -eq 'cim' -and -not $want.Contains([int]$p.ProcessId)) { continue }
     $procs.Add([ordered]@{ id = [int]$p.ProcessId; n = [string]$p.Name; path = [string]$p.ExecutablePath; cmd = [string]$p.CommandLine; pp = [int]$p.ParentProcessId })
   }
 } catch {
   foreach ($p in @(Get-Process)) {
+    if ($method -eq 'cim' -and -not $want.Contains([int]$p.Id)) { continue }
     $name = [string]$p.ProcessName
     if ($p.Path) { $name = [IO.Path]::GetFileName($p.Path) }
     $procs.Add([ordered]@{ id = [int]$p.Id; n = $name; path = [string]$p.Path; cmd = ''; pp = 0 })

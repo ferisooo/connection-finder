@@ -277,4 +277,14 @@ void main() {
     expect(groups.last.pids, {10, 11});
     expect(groups.last.level, RiskLevel.safe);
   });
+
+  test('the fake virus scenario is dangerous', () {
+    const path = r'C:\Users\Mia\AppData\Local\Temp\ConnectionFinder-FakeVirus.exe';
+    final a = assess(path,
+        conn: tcp(remote: '192.0.2.1', remotePort: 4444, state: 'SynSent'),
+        file: unsignedFile(path, created: now.subtract(const Duration(seconds: 5))));
+    expect(a.level, RiskLevel.dangerous);
+    expect(titles(a), containsAll([
+      'Runs from a Temp folder', 'No digital signature', 'Suspicious port 4444', 'Brand-new program']));
+  });
 }

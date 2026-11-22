@@ -8,7 +8,9 @@ import 'dart:io';
 
 import 'package:connection_finder/models.dart';
 import 'package:connection_finder/services/process_path.dart';
+import 'package:connection_finder/services/risk_engine.dart';
 import 'package:connection_finder/services/scanner.dart';
+import 'package:connection_finder/state/app_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -58,4 +60,47 @@ void main() {
     expect(path, isNotNull);
     expect(path!.toLowerCase(), endsWith('.exe'));
   });
+
+  test('the harmless fake virus is caught as dangerous', () async {
+    final temp = Platform.environment['TEMP'] ?? Directory.systemTemp.path;
+    final exe = '$temp\\ConnectionFinder-FakeVirus.exe';
+    final build = await Process.run(
+        'dart', ['compile', 'exe', 'tool/fake_virus.dart', '-o', exe],
+        runInShell: true);
+    expect(build.exitCode, 0, reason: '${build.stdout}\n${build.stderr}');
+
+    final virus = await Process.start(exe, const []);
+    try {
+      final scanner = WindowsScanner();
+      ScanResult? result;
+      var conns = <NetConnection>[];
+      for (var i = 0; i < 5 && conns.isEmpty; i++) {
+        await Future<void>.delayed(const Duration(seconds: 2));
+        result = await scanner.scan();
+        conns = result.connections.where((c) => c.pid == virus.pid).toList();
+      }
+      // ignore: avoid_print
+      print('fake virus connections: ${conns.map((c) => '${c.state} ${c.remoteAddress}:${c.remotePort}').toList()}');
+      expect(conns, isNotEmpty, reason: 'the fake virus should be trying to connect');
+
+      final process = result!.processes[virus.pid]!;
+      expect(process.path, isNotNull);
+      expect(process.path!.toLowerCase(), endsWith('connectionfinder-fakevirus.exe'));
+      final files = await scanner.inspectFiles([process.path!]);
+      final c = conns.first;
+      final risk = const RiskEngine().assess(RiskInput(
+        connection: c,
+        direction: directionOf(c, const {}),
+        process: process,
+        file: files[process.path!],
+      ));
+      // ignore: avoid_print
+      print('fake virus score ${risk.score}: ${risk.reasons.map((r) => r.title).toList()}');
+      expect(risk.level, RiskLevel.dangerous);
+      expect(risk.reasons.map((r) => r.title),
+          containsAll(['Runs from a Temp folder', 'No digital signature', 'Suspicious port 4444']));
+    } finally {
+      virus.kill();
+    }
+  }, timeout: const Timeout(Duration(minutes: 5)));
 }

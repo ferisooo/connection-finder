@@ -22,6 +22,7 @@ A pink & black Windows app that shows **which IP addresses are connected to your
 - **Things it checks:** sneaky folders (Temp, Downloads, Recycle Bin, hidden Windows folders), missing or broken digital signatures, fake Windows names (`svch0st.exe`), Windows tools that hackers misuse, hidden or encoded start-up commands, fake document names (`invoice.pdf.exe`), hacker / Tor / crypto-mining / remote-control ports, VPN or proxy IPs, and countries you choose to flag.
 - **Ask AI:** one click sends a program's details to *your* AI, using *your* API key, for a second opinion.
 - **Quick actions:** open the program's folder, stop the program, or open **Details**, which has everything (technical bits are tucked away at the bottom).
+- **Test the alarm:** in Settings, **Start fake virus** runs a harmless test program for 2 minutes (`tool/fake_virus.dart`). It reads, logs and sends nothing; it only tries to reach a reserved test address (192.0.2.1) that belongs to nobody, from the Temp folder, unsigned, on "hacker" port 4444. Connection Finder should flag it as **Danger!** within seconds.
 - **Help** button (top right) explains everything in simple words. Text is at least 15px everywhere.
 - Updates live every few seconds. Click the **Live** pill to pause.
 

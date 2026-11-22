@@ -43,6 +43,12 @@ class SettingsScreen extends StatelessWidget {
                       'Get a second opinion from your own AI. Pick the company, paste your key, done.',
                   child: _AiSettings(settings: settings, ai: ai),
                 ),
+                const _Card(
+                  icon: Icons.bug_report_rounded,
+                  title: 'Test the alarm',
+                  subtitle: 'See Connection Finder catch something suspicious, safely.',
+                  child: _FakeVirusTest(),
+                ),
                 _Card(
                   icon: Icons.bolt_rounded,
                   title: 'Live updates',
@@ -770,6 +776,53 @@ class _TestButtonState extends State<_TestButton> {
               ],
             ),
           ),
+      ],
+    );
+  }
+}
+
+class _FakeVirusTest extends StatefulWidget {
+  const _FakeVirusTest();
+
+  @override
+  State<_FakeVirusTest> createState() => _FakeVirusTestState();
+}
+
+class _FakeVirusTestState extends State<_FakeVirusTest> {
+  bool _busy = false;
+
+  Future<void> _start() async {
+    setState(() => _busy = true);
+    final result = await const SystemActions().startFakeVirus();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    showToast(context, result.message, ok: result.ok);
+    if (result.ok) Navigator.of(context).maybePop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'This starts a harmless fake virus for 2 minutes. It reads nothing, logs nothing and sends nothing: '
+          'it only keeps trying to reach a test address that belongs to nobody. But it acts suspicious on purpose. '
+          'It runs from the Temp folder, has no digital signature and uses a "hacker" port.\n\n'
+          'Connection Finder should show it as "Danger!" within a few seconds. '
+          'You can stop it with "Stop program", or it quits by itself.',
+          style: TextStyle(color: AppColors.muted, fontSize: 15, height: 1.45),
+        ),
+        const SizedBox(height: 14),
+        FilledButton.icon(
+          onPressed: _busy ? null : _start,
+          icon: _busy
+              ? const SizedBox(
+                  width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.bug_report_rounded, size: 20),
+          label: const Text('Start fake virus'),
+        ),
       ],
     );
   }

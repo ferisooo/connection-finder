@@ -22,7 +22,6 @@ class IpApiGeoLookup implements GeoLookup {
 
   final http.Client _client;
   final Map<String, GeoInfo> _cache = {};
-  final Set<String> _failed = {};
   final Set<String> _inFlight = {};
   DateTime? _pausedUntil;
 
@@ -41,7 +40,6 @@ class IpApiGeoLookup implements GeoLookup {
         .where(isPublicIp)
         .where((ip) =>
             !_cache.containsKey(ip) &&
-            !_failed.contains(ip) &&
             !_inFlight.contains(ip))
         .toSet()
         .toList();
@@ -74,7 +72,12 @@ class IpApiGeoLookup implements GeoLookup {
           final ip = item['query']?.toString();
           if (ip == null) continue;
           if (item['status'] != 'success') {
-            _failed.add(ip);
+            final why = item['message']?.toString() ?? '';
+            _cache[ip] = GeoInfo(
+              ip: ip,
+              org: why.contains('reserved') ? 'Reserved test address (nobody owns it)' : 'Unknown owner',
+            );
+            learned = true;
             continue;
           }
           _cache[ip] = GeoInfo(

@@ -43,6 +43,9 @@ jobs:
           --build-number ${{ github.run_number }}
           --dart-define=APP_VERSION=${{ env.APP_VERSION }}
 
+      - name: Add the harmless fake virus (for the "Test the alarm" button)
+        run: dart compile exe tool/fake_virus.dart -o build/windows/x64/runner/Release/ConnectionFinder-FakeVirus.exe
+
       - name: Add the Visual C++ runtime so the app runs on any PC
         shell: pwsh
         run: |

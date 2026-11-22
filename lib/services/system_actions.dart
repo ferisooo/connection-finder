@@ -68,6 +68,38 @@ class SystemActions {
     return result.exitCode == 0;
   }
 
+  /// File name of the harmless fake virus that ships next to the app.
+  static const fakeVirusName = 'ConnectionFinder-FakeVirus.exe';
+
+  /// Copies the harmless fake virus into the Temp folder and starts it, so
+  /// people can see Connection Finder catch something suspicious.
+  Future<ActionResult> startFakeVirus() async {
+    if (!supported) return _notWindows;
+    final appDir = File(Platform.resolvedExecutable).parent.path;
+    final source = File('$appDir\\$fakeVirusName');
+    if (!source.existsSync()) {
+      return const ActionResult(false,
+          "The fake virus isn't installed. Please install the newest version.");
+    }
+    final temp = Platform.environment['TEMP'] ?? Directory.systemTemp.path;
+    final target = File('$temp\\$fakeVirusName');
+    try {
+      if (target.existsSync()) target.deleteSync();
+      source.copySync(target.path);
+    } catch (_) {
+      // Still running from last time: that's fine, it is already visible.
+      if (target.existsSync()) {
+        return const ActionResult(true,
+            'The fake virus is already running. Look for it in the list!');
+      }
+      return const ActionResult(false, "Couldn't copy the fake virus to the Temp folder.");
+    }
+    await Process.start(target.path, const [], mode: ProcessStartMode.detached);
+    return const ActionResult(true,
+        'Fake virus started! It should show up as "Danger!" in a few seconds. '
+        'It stops by itself after 2 minutes.');
+  }
+
   /// Opens a web page in the default browser.
   Future<void> openUrl(String url) async {
     if (!supported || !url.startsWith('https://')) return;

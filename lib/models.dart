@@ -1,0 +1,335 @@
+// Data types shared by the scanner, the risk engine, the AI helper and the UI.
+
+/// How worried the app is about a connection.
+enum RiskLevel { safe, suspicious, dangerous }
+
+/// Which way a connection goes, from this PC's point of view.
+enum Direction {
+  /// This PC reached out to a remote computer.
+  outgoing,
+
+  /// A remote computer connected in to a program on this PC.
+  incoming,
+
+  /// A program is waiting for others to connect (an "open door").
+  listening,
+
+  /// Both ends are this same PC.
+  local,
+
+  /// Closing / leftover connections.
+  other,
+}
+
+/// One network connection (or listening socket) owned by a process.
+class NetConnection {
+  const NetConnection({
+    required this.protocol,
+    required this.localAddress,
+    required this.localPort,
+    required this.remoteAddress,
+    required this.remotePort,
+    required this.state,
+    required this.pid,
+  });
+
+  /// `TCP` or `UDP`.
+  final String protocol;
+  final String localAddress;
+  final int localPort;
+
+  /// Empty for UDP endpoints and listening sockets.
+  final String remoteAddress;
+  final int remotePort;
+
+  /// `Established`, `Listen`, `Bound`, `TimeWait`, ...
+  final String state;
+  final int pid;
+
+  String get key =>
+      '$protocol|$localAddress|$localPort|$remoteAddress|$remotePort|$pid';
+
+  bool get isTcp => protocol == 'TCP';
+  bool get isListening => state == 'Listen' || (!isTcp && remotePort == 0);
+  bool get isEstablished => state == 'Established';
+}
+
+/// A running program.
+class ProcessInfo {
+  const ProcessInfo({
+    required this.pid,
+    required this.name,
+    this.path,
+    this.commandLine,
+    this.parentPid,
+  });
+
+  final int pid;
+  final String name;
+
+  /// Full path of the program file, or null when Windows hides it.
+  final String? path;
+  final String? commandLine;
+  final int? parentPid;
+
+  ProcessInfo withPath(String? newPath) => ProcessInfo(
+        pid: pid,
+        name: name,
+        path: newPath,
+        commandLine: commandLine,
+        parentPid: parentPid,
+      );
+}
+
+/// Result of checking a program's digital signature.
+enum SignatureStatus {
+  valid,
+  notSigned,
+  hashMismatch,
+  notTrusted,
+  unknownError,
+  notSupported,
+  unknown,
+}
+
+SignatureStatus parseSignatureStatus(String? raw) {
+  switch ((raw ?? '').toLowerCase()) {
+    case 'valid':
+      return SignatureStatus.valid;
+    case 'notsigned':
+      return SignatureStatus.notSigned;
+    case 'hashmismatch':
+      return SignatureStatus.hashMismatch;
+    case 'nottrusted':
+      return SignatureStatus.notTrusted;
+    case 'unknownerror':
+      return SignatureStatus.unknownError;
+    case 'notsupportedfileformat':
+    case 'incompatible':
+      return SignatureStatus.notSupported;
+    default:
+      return SignatureStatus.unknown;
+  }
+}
+
+/// Facts about a program file on disk.
+class FileInfo {
+  const FileInfo({
+    required this.path,
+    required this.exists,
+    this.signature = SignatureStatus.unknown,
+    this.signer,
+    this.company,
+    this.product,
+    this.description,
+    this.created,
+    this.size,
+  });
+
+  final String path;
+  final bool exists;
+  final SignatureStatus signature;
+  final String? signer;
+  final String? company;
+  final String? product;
+  final String? description;
+  final DateTime? created;
+  final int? size;
+
+  bool get isSigned => signature == SignatureStatus.valid;
+}
+
+/// Who owns an IP address and where it is.
+class GeoInfo {
+  const GeoInfo({
+    required this.ip,
+    this.country,
+    this.countryCode,
+    this.city,
+    this.isp,
+    this.org,
+    this.asName,
+    this.proxy = false,
+    this.hosting = false,
+  });
+
+  final String ip;
+  final String? country;
+  final String? countryCode;
+  final String? city;
+  final String? isp;
+  final String? org;
+  final String? asName;
+
+  /// The IP belongs to a VPN, proxy or Tor service.
+  final bool proxy;
+
+  /// The IP belongs to a data center / hosting company.
+  final bool hosting;
+
+  /// Best short name for who owns the IP.
+  String? get owner {
+    for (final v in [org, isp, asName]) {
+      if (v != null && v.trim().isNotEmpty) return v.trim();
+    }
+    return null;
+  }
+}
+
+/// What kind of clue a [RiskReason] is.
+enum ReasonKind {
+  folder,
+  signature,
+  disguise,
+  tool,
+  command,
+  port,
+  network,
+  country,
+  file,
+}
+
+/// One warning clue that adds to a connection's risk score.
+class RiskReason {
+  const RiskReason({
+    required this.kind,
+    required this.title,
+    required this.detail,
+    required this.points,
+  });
+
+  final ReasonKind kind;
+  final String title;
+  final String detail;
+  final int points;
+}
+
+class RiskAssessment {
+  const RiskAssessment({
+    required this.score,
+    this.reasons = const [],
+    this.notes = const [],
+  });
+
+  static const safeScore = RiskAssessment(score: 0);
+
+  final int score;
+  final List<RiskReason> reasons;
+
+  /// Friendly info lines that don't change the score.
+  final List<String> notes;
+
+  RiskLevel get level => levelForScore(score);
+
+  static RiskLevel levelForScore(int score) {
+    if (score >= 50) return RiskLevel.dangerous;
+    if (score >= 20) return RiskLevel.suspicious;
+    return RiskLevel.safe;
+  }
+}
+
+/// The AI's opinion about a connection.
+enum AiRating { safe, suspicious, dangerous, unknown }
+
+class AiVerdict {
+  const AiVerdict({
+    required this.rating,
+    required this.confidence,
+    required this.summary,
+    required this.advice,
+    required this.provider,
+    required this.model,
+    required this.time,
+    this.error,
+  });
+
+  factory AiVerdict.failed(String error,
+          {required String provider, required String model}) =>
+      AiVerdict(
+        rating: AiRating.unknown,
+        confidence: 0,
+        summary: '',
+        advice: '',
+        provider: provider,
+        model: model,
+        time: DateTime.now(),
+        error: error,
+      );
+
+  final AiRating rating;
+  final int confidence;
+  final String summary;
+  final String advice;
+  final String provider;
+  final String model;
+  final DateTime time;
+  final String? error;
+
+  bool get isError => error != null;
+}
+
+/// Everything the UI shows for one connection.
+class ConnectionRow {
+  const ConnectionRow({
+    required this.connection,
+    required this.direction,
+    required this.risk,
+    required this.firstSeen,
+    this.process,
+    this.file,
+    this.geo,
+    this.isNew = false,
+  });
+
+  final NetConnection connection;
+  final ProcessInfo? process;
+  final FileInfo? file;
+  final GeoInfo? geo;
+  final RiskAssessment risk;
+  final Direction direction;
+  final DateTime firstSeen;
+  final bool isNew;
+
+  int get pid => connection.pid;
+  String? get path => process?.path;
+  String? get folder => folderOf(path);
+
+  String get fileName {
+    final p = path;
+    if (p != null && p.isNotEmpty) return fileNameOf(p);
+    final name = process?.name;
+    if (name != null && name.isNotEmpty) return name;
+    if (pid == 0) return 'System Idle Process';
+    if (pid == 4) return 'System';
+    return 'Program #$pid';
+  }
+
+  /// Is this Windows itself (the kernel), which has no program file?
+  bool get isWindowsCore => pid == 0 || pid == 4;
+
+  /// Key used to remember the AI's verdict, so the same program talking to
+  /// the same place doesn't need to be asked about twice.
+  String get aiKey {
+    final who = (path ?? process?.name ?? 'pid$pid').toLowerCase();
+    if (direction == Direction.listening) {
+      return '$who|listen|${connection.protocol}|${connection.localPort}';
+    }
+    return '$who|${connection.remoteAddress}|${connection.remotePort}';
+  }
+}
+
+/// Folder part of a Windows (or POSIX) path, without the trailing slash.
+String? folderOf(String? path) {
+  if (path == null || path.isEmpty) return null;
+  final i = path.lastIndexOf(RegExp(r'[\\/]'));
+  if (i <= 0) return null;
+  // Keep the slash for drive roots like "C:\".
+  if (i == 2 && path[1] == ':') return path.substring(0, 3);
+  return path.substring(0, i);
+}
+
+/// File name part of a Windows (or POSIX) path.
+String fileNameOf(String path) {
+  final i = path.lastIndexOf(RegExp(r'[\\/]'));
+  return i < 0 ? path : path.substring(i + 1);
+}

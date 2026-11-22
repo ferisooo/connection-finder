@@ -1,0 +1,67 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: ['**']
+    paths-ignore: ['**.md']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.50.1
+          cache: true
+
+      - name: Download packages
+        run: flutter pub get
+
+      - name: Check the code
+        run: flutter analyze
+
+      - name: Run tests (includes a real Windows connection scan)
+        run: flutter test
+
+      - name: Build the app
+        run: flutter build windows --release
+
+      - name: Add the Visual C++ runtime so the app runs on any PC
+        shell: pwsh
+        run: |
+          $release = "build\windows\x64\runner\Release"
+          $dlls = @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -property installationPath
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC" -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object { Get-ChildItem $_.FullName -Recurse -Directory -Filter 'Microsoft.VC14*.CRT' -ErrorAction SilentlyContinue } |
+            Where-Object { $_.FullName -match '\\x64\\' -and $_.FullName -notmatch 'onecore|spectre' } |
+            Select-Object -First 1
+          foreach ($dll in $dlls) {
+            if ($crt -and (Test-Path (Join-Path $crt.FullName $dll))) {
+              Copy-Item (Join-Path $crt.FullName $dll) $release
+            } else {
+              Copy-Item "$env:SystemRoot\System32\$dll" $release
+            }
+          }
+          Get-ChildItem $release | Select-Object Name, Length | Format-Table
+
+      - name: Upload the app
+        uses: actions/upload-artifact@v4
+        with:
+          name: ConnectionFinder-Windows
+          path: build/windows/x64/runner/Release/
+          if-no-files-found: error
+          retention-days: 30

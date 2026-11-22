@@ -1,0 +1,708 @@
+// Settings: the AI helper (provider, key, model), live updates, IP lookup.
+
+import 'package:material_ui/material_ui.dart';
+
+import '../services/ai_service.dart';
+import '../services/settings.dart';
+import '../services/system_actions.dart';
+import '../theme.dart';
+import 'widgets.dart';
+
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key, required this.settings, required this.ai});
+
+  final AppSettings settings;
+  final AiService ai;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: AppColors.bg,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: AppColors.text,
+        iconTheme: const IconThemeData(color: AppColors.pink),
+        title: const GradientText('Settings',
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      ),
+      body: ListenableBuilder(
+        listenable: settings,
+        builder: (context, _) => Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 860),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+              children: [
+                _Card(
+                  icon: Icons.auto_awesome_rounded,
+                  title: 'AI helper',
+                  subtitle:
+                      'Use your own AI key to get a second opinion on whether a connection is suspicious.',
+                  child: _AiSettings(settings: settings, ai: ai),
+                ),
+                _Card(
+                  icon: Icons.bolt_rounded,
+                  title: 'Live updates',
+                  subtitle: 'How often the list refreshes by itself.',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _SwitchRow(
+                        title: 'Refresh automatically',
+                        value: settings.autoRefresh,
+                        onChanged: (v) => settings.autoRefresh = v,
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          for (final s in AppSettings.refreshChoices)
+                            ChoiceChip(
+                              label: Text('Every $s seconds'),
+                              selected: settings.refreshSeconds == s,
+                              onSelected: (_) => settings.refreshSeconds = s,
+                              selectedColor: AppColors.pink,
+                              backgroundColor: AppColors.panel,
+                              labelStyle: TextStyle(
+                                color: settings.refreshSeconds == s
+                                    ? Colors.white
+                                    : AppColors.text,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              side: const BorderSide(color: AppColors.border),
+                              showCheckmark: false,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                _Card(
+                  icon: Icons.public_rounded,
+                  title: 'IP lookup',
+                  subtitle: 'Find out which country and company each IP belongs to.',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _SwitchRow(
+                        title: 'Look up country & owner of internet IPs',
+                        subtitle:
+                            'Sends only the public IP addresses (not your files or programs) to ip-api.com, a free lookup service. '
+                            'Its free plan uses a plain, unencrypted web connection.',
+                        value: settings.geoLookup,
+                        onChanged: (v) => settings.geoLookup = v,
+                      ),
+                      const SizedBox(height: 14),
+                      _CountryField(settings: settings),
+                    ],
+                  ),
+                ),
+                _Card(
+                  icon: Icons.tune_rounded,
+                  title: 'What to show',
+                  child: _SwitchRow(
+                    title: 'Show local & closing connections',
+                    subtitle:
+                        'Connections that stay inside this PC, plus ones that are shutting down. Usually just noise.',
+                    value: settings.showLocal,
+                    onChanged: (v) => settings.showLocal = v,
+                  ),
+                ),
+                const _Card(
+                  icon: Icons.favorite_rounded,
+                  title: 'How the warnings work',
+                  child: Text(
+                    'Every connection gets a risk score from clues: a sneaky folder (Temp, Downloads, hidden Windows folders), '
+                    'no digital signature, a fake Windows name (like svch0st.exe), Windows tools that hackers misuse, hidden or '
+                    'encoded start commands, fake document names (invoice.pdf.exe), hacker / Tor / mining ports, remote-control '
+                    'doors, VPN/proxy IPs and countries you flag.\n\n'
+                    '20+ points = Suspicious (pink).  50+ points = Danger (hot pink, glowing).\n\n'
+                    'A warning is not proof of malware. When unsure, ask the AI helper, look the program up online, '
+                    'or scan it with Windows Security.',
+                    style: TextStyle(color: AppColors.muted, height: 1.5, fontSize: 13.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Card extends StatelessWidget {
+  const _Card({required this.icon, required this.title, required this.child, this.subtitle});
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.borderSoft),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  gradient: AppColors.pinkGradient,
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(icon, color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                    if (subtitle != null)
+                      Text(subtitle!,
+                          style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _SwitchRow extends StatelessWidget {
+  const _SwitchRow({
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.subtitle,
+  });
+
+  final String title;
+  final String? subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
+              if (subtitle != null) ...[
+                const SizedBox(height: 3),
+                Text(subtitle!,
+                    style: const TextStyle(color: AppColors.muted, fontSize: 12.5, height: 1.4)),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(width: 16),
+        Switch(value: value, onChanged: onChanged),
+      ],
+    );
+  }
+}
+
+class _CountryField extends StatefulWidget {
+  const _CountryField({required this.settings});
+  final AppSettings settings;
+
+  @override
+  State<_CountryField> createState() => _CountryFieldState();
+}
+
+class _CountryFieldState extends State<_CountryField> {
+  late final TextEditingController _text = TextEditingController(
+      text: (widget.settings.flaggedCountries.toList()..sort()).join(', '));
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final codes = widget.settings.flaggedCountries.toList()..sort();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _text,
+          onChanged: widget.settings.setFlaggedCountriesText,
+          decoration: const InputDecoration(
+            labelText: 'Warn me about connections to these countries',
+            hintText: 'Two-letter codes, like: RU, CN, KP',
+            prefixIcon: Icon(Icons.flag_rounded, color: AppColors.pink),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          codes.isEmpty
+              ? 'No countries flagged.'
+              : 'Flagged: ${codes.join(', ')} (+25 risk points each time)',
+          style: const TextStyle(color: AppColors.faint, fontSize: 12.5),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// AI helper settings
+// ---------------------------------------------------------------------------
+
+class _AiSettings extends StatelessWidget {
+  const _AiSettings({required this.settings, required this.ai});
+
+  final AppSettings settings;
+  final AiService ai;
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = settings.provider;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DropdownButtonFormField<AiProvider>(
+          initialValue: provider,
+          isExpanded: true,
+          dropdownColor: AppColors.cardHigh,
+          borderRadius: BorderRadius.circular(14),
+          decoration: const InputDecoration(
+            labelText: 'AI company',
+            prefixIcon: Icon(Icons.business_rounded, color: AppColors.pink),
+          ),
+          items: [
+            for (final p in AiProvider.values)
+              DropdownMenuItem(
+                value: p,
+                child: Row(
+                  children: [
+                    Text(p.label),
+                    if (settings.hasKey(p)) ...[
+                      const SizedBox(width: 8),
+                      const Icon(Icons.vpn_key_rounded, size: 14, color: AppColors.pink),
+                    ],
+                  ],
+                ),
+              ),
+          ],
+          onChanged: (p) {
+            if (p != null) settings.provider = p;
+          },
+        ),
+        const SizedBox(height: 14),
+        if (provider == AiProvider.custom) ...[
+          _CustomUrlField(key: const ValueKey('custom-url'), settings: settings),
+          const SizedBox(height: 14),
+        ],
+        _ApiKeyField(key: ValueKey('key-${provider.name}'), settings: settings, provider: provider),
+        const SizedBox(height: 14),
+        _ModelField(key: ValueKey('model-${provider.name}'), settings: settings, provider: provider, ai: ai),
+        const SizedBox(height: 16),
+        _TestButton(key: ValueKey('test-${provider.name}'), settings: settings, ai: ai),
+        const SizedBox(height: 14),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.panel,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.borderSoft),
+          ),
+          child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.lock_rounded, size: 18, color: AppColors.softPink),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Your key is stored in the Windows Credential Manager on this PC and is only sent to the AI company you pick. '
+                  'Nothing is sent to the AI until you press an "Ask AI" button. Then the app sends that connection\'s IP, '
+                  'program folder and file name, start command and clues.',
+                  style: TextStyle(color: AppColors.muted, fontSize: 12.5, height: 1.45),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ApiKeyField extends StatefulWidget {
+  const _ApiKeyField({super.key, required this.settings, required this.provider});
+
+  final AppSettings settings;
+  final AiProvider provider;
+
+  @override
+  State<_ApiKeyField> createState() => _ApiKeyFieldState();
+}
+
+class _ApiKeyFieldState extends State<_ApiKeyField> {
+  late final TextEditingController _text =
+      TextEditingController(text: widget.settings.keyFor(widget.provider));
+  bool _show = false;
+  bool _dirty = false;
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    await widget.settings.setApiKey(widget.provider, _text.text);
+    if (!mounted) return;
+    setState(() => _dirty = false);
+    showToast(context,
+        _text.text.trim().isEmpty ? 'Key removed.' : '${widget.provider.shortName} key saved safely.');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.provider;
+    final saved = widget.settings.hasKey(p) && !_dirty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _text,
+                obscureText: !_show,
+                enableSuggestions: false,
+                autocorrect: false,
+                onChanged: (_) => setState(() => _dirty = true),
+                onSubmitted: (_) => _save(),
+                style: mono(14),
+                decoration: InputDecoration(
+                  labelText: p.needsKey ? '${p.shortName} API key' : 'API key (optional)',
+                  hintText: p.keyHint,
+                  prefixIcon: const Icon(Icons.vpn_key_rounded, color: AppColors.pink),
+                  suffixIcon: IconButton(
+                    tooltip: _show ? 'Hide key' : 'Show key',
+                    icon: Icon(_show ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                        color: AppColors.muted),
+                    onPressed: () => setState(() => _show = !_show),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              height: 50,
+              child: FilledButton.icon(
+                onPressed: _dirty ? _save : null,
+                icon: Icon(saved ? Icons.check_rounded : Icons.save_rounded, size: 18),
+                label: Text(saved ? 'Saved' : 'Save key'),
+              ),
+            ),
+          ],
+        ),
+        if (p.keyPage.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: TextButton.icon(
+              onPressed: () => const SystemActions().openUrl(p.keyPage),
+              icon: const Icon(Icons.open_in_new_rounded, size: 16),
+              label: Text('Get a ${p.shortName} key  (${p.keyPage.replaceFirst('https://', '')})'),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _CustomUrlField extends StatefulWidget {
+  const _CustomUrlField({super.key, required this.settings});
+  final AppSettings settings;
+
+  @override
+  State<_CustomUrlField> createState() => _CustomUrlFieldState();
+}
+
+class _CustomUrlFieldState extends State<_CustomUrlField> {
+  late final TextEditingController _text =
+      TextEditingController(text: widget.settings.customUrl);
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _text,
+      onChanged: (v) => widget.settings.customUrl = v,
+      style: mono(13.5),
+      decoration: const InputDecoration(
+        labelText: 'AI server address (OpenAI-compatible chat/completions)',
+        hintText: 'http://localhost:11434/v1/chat/completions',
+        helperText: 'Works with Ollama, LM Studio, Groq, Together and others.',
+        prefixIcon: Icon(Icons.dns_rounded, color: AppColors.pink),
+      ),
+    );
+  }
+}
+
+class _ModelField extends StatefulWidget {
+  const _ModelField({super.key, required this.settings, required this.provider, required this.ai});
+
+  final AppSettings settings;
+  final AiProvider provider;
+  final AiService ai;
+
+  @override
+  State<_ModelField> createState() => _ModelFieldState();
+}
+
+class _ModelFieldState extends State<_ModelField> {
+  late final TextEditingController _text =
+      TextEditingController(text: widget.settings.modelFor(widget.provider));
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final models = await widget.ai.listModels(widget.settings.aiConfig);
+      if (!mounted) return;
+      if (models.isEmpty) {
+        setState(() => _error = 'No models found for this key.');
+        return;
+      }
+      final pick = await showDialog<String>(
+        context: context,
+        builder: (_) => _ModelPicker(models: models, current: _text.text),
+      );
+      if (pick != null && mounted) {
+        _text.text = pick;
+        widget.settings.setModel(widget.provider, pick);
+      }
+    } on AiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.provider;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _text,
+                onChanged: (v) => widget.settings.setModel(p, v),
+                style: mono(14),
+                decoration: InputDecoration(
+                  labelText: 'Model',
+                  hintText: p.defaultModel.isEmpty ? 'e.g. llama3.1' : p.defaultModel,
+                  helperText: p.defaultModel.isEmpty
+                      ? 'Type the model name your server uses.'
+                      : 'Default: ${p.defaultModel}. Press "Choose model" to see what your key can use.',
+                  prefixIcon: const Icon(Icons.memory_rounded, color: AppColors.pink),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              height: 50,
+              child: OutlinedButton.icon(
+                onPressed: _loading ? null : _load,
+                icon: _loading
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.list_rounded, size: 18),
+                label: const Text('Choose model'),
+              ),
+            ),
+          ],
+        ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12.5)),
+          ),
+      ],
+    );
+  }
+}
+
+class _ModelPicker extends StatefulWidget {
+  const _ModelPicker({required this.models, required this.current});
+
+  final List<String> models;
+  final String current;
+
+  @override
+  State<_ModelPicker> createState() => _ModelPickerState();
+}
+
+class _ModelPickerState extends State<_ModelPicker> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = widget.models
+        .where((m) => m.toLowerCase().contains(_query.toLowerCase()))
+        .toList();
+    return Dialog(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 560),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Choose a model',
+                  style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 12),
+              TextField(
+                autofocus: true,
+                onChanged: (v) => setState(() => _query = v),
+                decoration: const InputDecoration(
+                  hintText: 'Search models...',
+                  prefixIcon: Icon(Icons.search_rounded, color: AppColors.pink),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: shown.length,
+                  itemBuilder: (context, i) {
+                    final m = shown[i];
+                    final selected = m == widget.current;
+                    return ListTile(
+                      dense: true,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      selected: selected,
+                      selectedTileColor: AppColors.pink.withValues(alpha: 0.12),
+                      leading: Icon(selected ? Icons.radio_button_checked : Icons.radio_button_off,
+                          color: AppColors.pink, size: 18),
+                      title: Text(m, style: mono(13.5)),
+                      onTap: () => Navigator.pop(context, m),
+                    );
+                  },
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TestButton extends StatefulWidget {
+  const _TestButton({super.key, required this.settings, required this.ai});
+
+  final AppSettings settings;
+  final AiService ai;
+
+  @override
+  State<_TestButton> createState() => _TestButtonState();
+}
+
+class _TestButtonState extends State<_TestButton> {
+  bool _busy = false;
+  String? _result;
+  bool _ok = false;
+
+  Future<void> _test() async {
+    setState(() {
+      _busy = true;
+      _result = null;
+    });
+    try {
+      final reply = await widget.ai.testConnection(widget.settings.aiConfig);
+      _ok = true;
+      _result = 'It works! ${widget.settings.provider.shortName} replied: "$reply"';
+    } on AiException catch (e) {
+      _ok = false;
+      _result = e.message;
+    } catch (e) {
+      _ok = false;
+      _result = 'Something went wrong: $e';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        FilledButton.icon(
+          onPressed: _busy ? null : _test,
+          icon: _busy
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.wifi_tethering_rounded, size: 18),
+          label: const Text('Test connection'),
+        ),
+        const SizedBox(width: 14),
+        if (_result != null)
+          Expanded(
+            child: Row(
+              children: [
+                Icon(_ok ? Icons.favorite_rounded : Icons.error_outline_rounded,
+                    color: _ok ? AppColors.pink : AppColors.danger, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(_result!,
+                      style: TextStyle(color: _ok ? AppColors.blush : AppColors.danger, fontSize: 13)),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}

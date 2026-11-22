@@ -166,15 +166,30 @@ void main() {
     expect(a.level, isNot(RiskLevel.safe));
   });
 
+  test('signed apps talking to cloud networks marked "proxy" stay safe', () {
+    const path = r'C:\Program Files\Google\Chrome\Application\chrome.exe';
+    final a = assess(path,
+        file: signedFile(path, signer: 'Google LLC'),
+        geo: const GeoInfo(
+            ip: '142.250.80.46', country: 'United States', countryCode: 'US',
+            org: 'AWS CloudFront (GLOBAL)', proxy: true, hosting: true));
+    expect(a.level, RiskLevel.safe);
+    expect(a.notes.join(), contains('cloud or proxy network'));
+    final b = assess(r'C:\Tools\thing.exe',
+        file: unsignedFile(r'C:\Tools\thing.exe'),
+        geo: const GeoInfo(ip: '142.250.80.46', org: 'Microsoft Azure', proxy: true));
+    expect(titles(b), isNot(contains('Hidden behind a VPN or Tor')));
+  });
+
   test('Tor/proxy IP and flagged country add points', () {
     const path = r'C:\Program Files\App\app.exe';
     final a = assess(path,
-        file: signedFile(path),
+        file: unsignedFile(path),
         geo: const GeoInfo(
             ip: '142.250.80.46', country: 'Narnia', countryCode: 'NA', proxy: true),
         flagged: {'NA'});
     expect(titles(a), containsAll(['Hidden behind a VPN or Tor', 'Flagged country: Narnia']));
-    expect(a.score, 45);
+    expect(a.score, 70); // + no signature
   });
 
   test('Windows kernel (PID 4) is never flagged', () {

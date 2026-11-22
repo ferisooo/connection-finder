@@ -416,8 +416,17 @@ class RiskEngine {
     final geo = input.geo;
     if (geo != null) {
       if (geo.proxy) {
-        add(ReasonKind.network, 'Hidden behind a VPN or Tor',
-            'The other side hides who it really is.', 20);
+        // Big cloud networks (Amazon CloudFront, Azure, Cloudflare...) are
+        // often marked as "proxy" because they pass traffic along for
+        // websites. That's normal for signed apps, so it only counts for
+        // unsigned programs talking to an unknown proxy.
+        if (signed || isBigCloudOwner(geo.owner)) {
+          notes.add('The other side is a cloud or proxy network (${geo.owner ?? 'unknown owner'}). '
+              'That is normal for well-known apps.');
+        } else {
+          add(ReasonKind.network, 'Hidden behind a VPN or Tor',
+              'The other side hides who it really is.', 20);
+        }
       }
       final code = geo.countryCode?.toUpperCase();
       if (code != null && input.flaggedCountries.contains(code)) {
@@ -521,4 +530,26 @@ bool looksRandomName(String base) {
     return vowels / letters.length < 0.2;
   }
   return false;
+}
+
+const List<String> _bigCloudNames = [
+  'amazon',
+  'aws',
+  'cloudfront',
+  'microsoft',
+  'azure',
+  'google',
+  'cloudflare',
+  'akamai',
+  'fastly',
+  'apple',
+  'facebook',
+  'meta platforms',
+];
+
+/// Is this IP owner one of the big, well-known cloud / CDN companies?
+bool isBigCloudOwner(String? owner) {
+  final o = owner?.toLowerCase();
+  if (o == null || o.isEmpty) return false;
+  return _bigCloudNames.any(o.contains);
 }

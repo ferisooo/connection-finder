@@ -16,7 +16,20 @@ import '../services/scanner.dart';
 import '../services/settings.dart';
 import '../services/system_actions.dart';
 
-enum ViewFilter { everything, suspicious }
+/// Where a program ends up in the app.
+enum ProgramStatus {
+  /// Has warning signs: shown.
+  risky,
+
+  /// Windows wouldn't let the app check it: shown, honestly marked.
+  unchecked,
+
+  /// Its file is still being checked: not shown yet.
+  checking,
+
+  /// Signed, normal and without warning signs: hidden.
+  trusted,
+}
 
 class Stats {
   const Stats({
@@ -24,12 +37,20 @@ class Stats {
     required this.programs,
     required this.suspiciousPrograms,
     required this.dangerousPrograms,
+    required this.uncheckedPrograms,
+    required this.checkingPrograms,
+    required this.trustedNames,
   });
 
   final int connections;
   final int programs;
   final int suspiciousPrograms;
   final int dangerousPrograms;
+  final int uncheckedPrograms;
+  final int checkingPrograms;
+
+  /// Names of the busiest trusted programs, for the summary.
+  final List<String> trustedNames;
 
   int get riskyPrograms => suspiciousPrograms + dangerousPrograms;
 }
@@ -80,7 +101,10 @@ int compareGroups(ProgramGroup a, ProgramGroup b) {
 List<ProgramGroup> groupByProgram(Iterable<ConnectionRow> rows) {
   final map = <String, List<ConnectionRow>>{};
   for (final r in rows) {
-    final key = r.path?.toLowerCase() ?? 'pid:${r.pid}';
+    // Programs whose folder is hidden are grouped by name (for example all
+    // the svchost.exe copies Windows runs).
+    final key = r.path?.toLowerCase() ??
+        (r.isWindowsCore ? 'pid:${r.pid}' : 'name:${r.fileName.toLowerCase()}');
     map.putIfAbsent(key, () => []).add(r);
   }
   return [
@@ -129,7 +153,6 @@ class AppController extends ChangeNotifier {
   int _aiBatchDone = 0;
 
   String _search = '';
-  ViewFilter _filter = ViewFilter.everything;
 
   Timer? _timer;
   bool? _timerAuto;
@@ -147,7 +170,6 @@ class AppController extends ChangeNotifier {
   bool get demoMode => _last?.demo ?? false;
   bool get usingNetstatFallback => _last?.method == 'netstat';
   String get search => _search;
-  ViewFilter get filter => _filter;
   bool get aiBatchRunning => _aiBatchRunning;
   int get aiBatchTotal => _aiBatchTotal;
   int get aiBatchDone => _aiBatchDone;
@@ -171,17 +193,58 @@ class AppController extends ChangeNotifier {
       g.path != null && g.file == null &&
       _inspecting.contains(g.path!.toLowerCase());
 
+  /// Decides whether a program is shown, and why.
+  ProgramStatus statusOf(ProgramGroup g) {
+    if (g.level != RiskLevel.safe) return ProgramStatus.risky;
+    if (g.isWindowsCore || g.pids.contains(pid)) return ProgramStatus.trusted;
+    final path = g.path;
+    if (path == null) return ProgramStatus.unchecked;
+    final file = g.file;
+    if (file == null) {
+      final key = path.toLowerCase();
+      final failed = _retryInspectAfter.containsKey(key) && !_inspecting.contains(key);
+      return failed ? ProgramStatus.unchecked : ProgramStatus.checking;
+    }
+    if (!file.exists ||
+        file.signature == SignatureStatus.unknown ||
+        file.signature == SignatureStatus.notSupported) {
+      return ProgramStatus.unchecked;
+    }
+    return ProgramStatus.trusted;
+  }
+
+  /// Only programs that need a look: suspicious ones and ones the app
+  /// couldn't check. Trusted programs are never shown.
   List<ProgramGroup> get visibleGroups =>
       _visibleCache ??= _groups.where(_passesFilters).toList(growable: false);
 
-  Stats get stats => Stats(
-        connections: _groups.fold(0, (n, g) => n + g.rows.length),
-        programs: _groups.length,
-        suspiciousPrograms:
-            _groups.where((g) => g.level == RiskLevel.suspicious).length,
-        dangerousPrograms:
-            _groups.where((g) => g.level == RiskLevel.dangerous).length,
-      );
+  /// How many programs need a look (before searching).
+  int get attentionCount => _groups.where((g) {
+        final st = statusOf(g);
+        return st == ProgramStatus.risky || st == ProgramStatus.unchecked;
+      }).length;
+
+  Stats get stats {
+    final trusted = _groups
+        .where((g) => statusOf(g) == ProgramStatus.trusted && !g.isWindowsCore)
+        .toList()
+      ..sort((a, b) => b.rows.length.compareTo(a.rows.length));
+    return Stats(
+      connections: _groups.fold(0, (n, g) => n + g.rows.length),
+      programs: _groups.length,
+      suspiciousPrograms:
+          _groups.where((g) => g.level == RiskLevel.suspicious).length,
+      dangerousPrograms:
+          _groups.where((g) => g.level == RiskLevel.dangerous).length,
+      uncheckedPrograms:
+          _groups.where((g) => statusOf(g) == ProgramStatus.unchecked).length,
+      checkingPrograms:
+          _groups.where((g) => statusOf(g) == ProgramStatus.checking).length,
+      trustedNames: [
+        for (final g in trusted.take(3)) g.fileName.replaceAll(RegExp(r'\.exe$', caseSensitive: false), ''),
+      ],
+    );
+  }
 
   /// Risky programs the AI hasn't judged yet.
   List<ProgramGroup> get pendingAiGroups => [
@@ -200,13 +263,6 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  set filter(ViewFilter value) {
-    if (value == _filter) return;
-    _filter = value;
-    _visibleCache = null;
-    notifyListeners();
-  }
-
   bool _passesLocalFilter(ConnectionRow r) {
     if (settings.showLocal) return true;
     if (r.direction == Direction.local || r.direction == Direction.other) {
@@ -220,7 +276,8 @@ class AppController extends ChangeNotifier {
   }
 
   bool _passesFilters(ProgramGroup g) {
-    if (_filter == ViewFilter.suspicious && g.level == RiskLevel.safe) {
+    final status = statusOf(g);
+    if (status != ProgramStatus.risky && status != ProgramStatus.unchecked) {
       return false;
     }
     final q = _search.trim().toLowerCase();
@@ -372,6 +429,7 @@ class AppController extends ChangeNotifier {
     if (todo.isEmpty) return;
 
     _inspecting.addAll(todo.keys);
+    _visibleCache = null;
     notifyListeners();
     try {
       final infos = await scanner.inspectFiles(todo.values.toList());

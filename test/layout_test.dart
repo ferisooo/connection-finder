@@ -153,13 +153,6 @@ void main() {
       expect(textsUnder15(tester), isEmpty);
     }
 
-    // Only-suspicious tab.
-    controller.filter = ViewFilter.suspicious;
-    await settle(tester);
-    expect(tester.takeException(), isNull);
-    controller.filter = ViewFilter.everything;
-    await settle(tester);
-
     // Details of every program, with the technical part opened.
     final context = tester.element(find.byType(Scaffold).first);
     for (final group in controller.visibleGroups) {

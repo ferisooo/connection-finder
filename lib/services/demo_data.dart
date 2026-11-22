@@ -42,7 +42,9 @@ final List<ProcessInfo> demoProcesses = [
     name: 'svchost.exe',
     path: r'C:\Windows\System32\svchost.exe',
     commandLine: r'C:\Windows\system32\svchost.exe -k NetworkService -p -s Dnscache',
+    services: ['DNS Client', 'Network Location Awareness'],
   ),
+  const ProcessInfo(pid: 912, name: 'lsass.exe'),
   const ProcessInfo(
     pid: 9120,
     name: 'chrome.exe',
@@ -138,6 +140,7 @@ final List<NetConnection> demoConnections = [
   _tcp(6100, _me, 51530, '170.114.52.2', 443),
   _tcp(1180, _me, 51200, '20.190.160.20', 443),
   _listen(4, '0.0.0.0', 445),
+  _listen(912, '0.0.0.0', 49664),
   _listen(1180, '0.0.0.0', 5353, protocol: 'UDP'),
   _tcp(9120, '127.0.0.1', 51800, '127.0.0.1', 51801),
 ];

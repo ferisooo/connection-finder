@@ -233,7 +233,15 @@ try {
     $procs.Add([ordered]@{ id = [int]$p.Id; n = $name; path = [string]$p.Path; cmd = ''; pp = 0 })
   }
 }
-$result = [ordered]@{ admin = $admin; method = $method; conns = $conns.ToArray(); procs = $procs.ToArray(); netstat = $netstat }
+# Services tell us the program file of many processes Windows hides.
+$svcs = New-Object System.Collections.Generic.List[object]
+try {
+  foreach ($s in @(Get-CimInstance -ClassName Win32_Service -Filter 'ProcessId > 0' -ErrorAction Stop)) {
+    if ($method -eq 'cim' -and -not $want.Contains([int]$s.ProcessId)) { continue }
+    $svcs.Add([ordered]@{ id = [int]$s.ProcessId; n = [string]$s.Name; d = [string]$s.DisplayName; path = [string]$s.PathName })
+  }
+} catch {}
+$result = [ordered]@{ admin = $admin; method = $method; conns = $conns.ToArray(); procs = $procs.ToArray(); svcs = $svcs.ToArray(); netstat = $netstat }
 $json = ConvertTo-Json -InputObject $result -Depth 4 -Compress
 # Escape non-English letters so the text survives any console code page.
 [regex]::Replace($json, '[^\u0000-\u007F]', { param($m) '\u{0:x4}' -f [int][char]$m.Value })
@@ -348,17 +356,41 @@ ScanResult parseScanJson(String raw) {
     }
   }
 
+  final serviceNames = <int, List<String>>{};
+  final servicePaths = <int, String>{};
+  for (final item in _asList(data['svcs'])) {
+    if (item is! Map) continue;
+    final pid = _int(item['id']);
+    final name = _str(item['d']) ?? _str(item['n']);
+    if (name != null) serviceNames.putIfAbsent(pid, () => []).add(name);
+    final exe = executableFromCommand(_str(item['path']));
+    if (exe != null) servicePaths.putIfAbsent(pid, () => exe);
+  }
+
   final processes = <int, ProcessInfo>{};
   for (final item in _asList(data['procs'])) {
     if (item is! Map) continue;
     final pid = _int(item['id']);
     final ppid = _int(item['pp']);
+    final name = _str(item['n']) ?? '';
+    var path = _str(item['path']);
+    // Windows often hides the folder of service programs (like svchost.exe)
+    // but still says which file the service starts. Only trust it when the
+    // file name matches the program's name.
+    final fromService = servicePaths[pid];
+    if (path == null &&
+        fromService != null &&
+        name.isNotEmpty &&
+        fileNameOf(fromService).toLowerCase() == name.toLowerCase()) {
+      path = fromService;
+    }
     processes[pid] = ProcessInfo(
       pid: pid,
-      name: _str(item['n']) ?? '',
-      path: _str(item['path']),
+      name: name,
+      path: path,
       commandLine: _str(item['cmd']),
       parentPid: ppid == 0 ? null : ppid,
+      services: [...?serviceNames[pid]]..sort(),
     );
   }
 
@@ -471,4 +503,42 @@ Map<String, FileInfo> parseInspectJson(String raw) {
     );
   }
   return out;
+}
+
+/// The program file inside a service command line such as
+/// `C:\WINDOWS\system32\svchost.exe -k netsvcs -p` or
+/// `"C:\Program Files\App\app.exe" --service`.
+String? executableFromCommand(String? command, {Map<String, String>? environment}) {
+  if (command == null) return null;
+  var cmd = command.trim();
+  if (cmd.isEmpty) return null;
+  final env = environment ?? Platform.environment;
+  cmd = cmd.replaceAllMapped(RegExp(r'%([^%]+)%'), (m) {
+    final key = m.group(1)!.toLowerCase();
+    for (final e in env.entries) {
+      if (e.key.toLowerCase() == key) return e.value;
+    }
+    return m.group(0)!;
+  });
+  String exe;
+  if (cmd.startsWith('"')) {
+    final end = cmd.indexOf('"', 1);
+    if (end <= 1) return null;
+    exe = cmd.substring(1, end);
+  } else {
+    final m = RegExp(r'^(.+?\.exe)(\s|$)', caseSensitive: false).firstMatch(cmd);
+    if (m == null) return null;
+    exe = m.group(1)!;
+  }
+  if (exe.startsWith(r'\??\')) exe = exe.substring(4);
+  if (exe.toLowerCase().startsWith(r'\systemroot\')) {
+    final root = env.entries
+        .firstWhere((e) => e.key.toLowerCase() == 'systemroot',
+            orElse: () => const MapEntry('SystemRoot', r'C:\Windows'))
+        .value;
+    exe = '$root${exe.substring(11)}';
+  }
+  // Must be a full path like C:\...
+  if (!RegExp(r'^[a-zA-Z]:\\').hasMatch(exe)) return null;
+  return exe;
 }

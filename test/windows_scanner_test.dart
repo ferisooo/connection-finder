@@ -28,6 +28,12 @@ void main() {
     expect(result.connections, isNotEmpty);
     expect(result.connections.any((c) => c.isListening), isTrue);
     expect(result.processes.values.where((p) => p.path != null), isNotEmpty);
+    final withServices =
+        result.processes.values.where((p) => p.services.isNotEmpty).toList();
+    // ignore: avoid_print
+    print('processes running services: ${withServices.length}, e.g. '
+        '${withServices.isEmpty ? '-' : '${withServices.first.name}: ${withServices.first.services.take(3).join(', ')}'}');
+    expect(withServices, isNotEmpty);
   }, timeout: const Timeout(Duration(minutes: 3)));
 
   test('signature check works on Windows files', () async {

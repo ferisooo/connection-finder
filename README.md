@@ -15,11 +15,10 @@ A pink & black Windows app that shows **which IP addresses are connected to your
 ## What it does
 
 - **One sentence at the top tells you what's going on.** For example: *"2 programs look dangerous. They're at the top of the list. Each card tells you why."* or *"Everything looks safe right now."*
-- **One card per program** shows its file name, the folder it runs from, and who it's talking to (IP address, country and owner).
-- **Every card answers "Is it suspicious?"**
-  - **Yes:** it lists why in plain words, for example *"Runs from a Temp folder. Temp is for throwaway files. Real apps rarely run from there."*
-  - **No:** it says why it looks safe, for example *"Made by Google LLC (signed) · Installed in Program Files · Secure connection (port 443)"*.
-- **Colors:** grey = looks safe, pink = suspicious, glowing pink = danger. 20+ warning points means suspicious, 50+ means danger.
+- **Only what needs a look is shown.** Trusted programs (signed by a known company, installed normally, no warning signs) stay hidden. You only see a card for a program that looks suspicious, or one Windows wouldn't let the app check.
+- **Every card answers "Is it suspicious?"** with the reasons in plain words, for example *"Runs from a Temp folder. Temp is for throwaway files. Real apps rarely run from there."*
+- **"Couldn't check"** means Windows hid the program from the app (it runs with higher rights). That's usually a Windows service, but the app says so honestly instead of calling it safe. **Restart as admin** checks those too.
+- **Colors:** pink = suspicious, glowing pink = danger, grey = couldn't check. 20+ warning points means suspicious, 50+ means danger.
 - **Things it checks:** sneaky folders (Temp, Downloads, Recycle Bin, hidden Windows folders), missing or broken digital signatures, fake Windows names (`svch0st.exe`), Windows tools that hackers misuse, hidden or encoded start-up commands, fake document names (`invoice.pdf.exe`), hacker / Tor / crypto-mining / remote-control ports, VPN or proxy IPs, and countries you choose to flag.
 - **Ask AI:** one click sends a program's details to *your* AI, using *your* API key, for a second opinion.
 - **Quick actions:** open the program's folder, stop the program, or open **Details**, which has everything (technical bits are tucked away at the bottom).

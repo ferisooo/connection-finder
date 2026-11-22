@@ -51,7 +51,9 @@ class DetailsDialog extends StatelessWidget {
     final verdict = controller.verdictFor(g);
     final asking = controller.isAsking(g);
     final level = g.level;
-    final color = AppColors.forLevel(level);
+    final unchecked = controller.statusOf(g) == ProgramStatus.unchecked;
+    final isAdmin = controller.isAdmin || controller.demoMode;
+    final color = unchecked ? AppColors.safe : AppColors.forLevel(level);
     final (sigText, sigColor) =
         signatureWords(g, checking: controller.isCheckingFile(g));
     final file = g.file;
@@ -86,7 +88,7 @@ class DetailsDialog extends StatelessWidget {
                   ],
                 ),
               ),
-              RiskBadge(level: level, large: true),
+              RiskBadge(level: level, large: true, unchecked: unchecked),
               const SizedBox(width: 6),
               IconButton(
                 tooltip: 'Close',
@@ -106,19 +108,24 @@ class DetailsDialog extends StatelessWidget {
               children: [
                 _Section(
                   title: 'Is it suspicious?',
-                  icon: levelIcon(level),
+                  icon: unchecked ? Icons.help_outline_rounded : levelIcon(level),
                   color: color,
                   children: [
-                    Text(verdictHeadline(level),
+                    Text(unchecked ? "Couldn't check this one." : verdictHeadline(level),
                         style: TextStyle(
                             color: color, fontSize: 19, fontWeight: FontWeight.w800)),
                     const SizedBox(height: 10),
+                    if (unchecked) ...[
+                      Text(uncheckedReason(g, isAdmin: isAdmin),
+                          style: const TextStyle(color: AppColors.muted, fontSize: 15, height: 1.4)),
+                      const SizedBox(height: 10),
+                    ],
                     if (g.reasons.isNotEmpty) ...[
                       const _Label('Why:'),
                       for (final r in g.reasons) _ReasonLine(reason: r, color: color),
                       const SizedBox(height: 8),
                     ],
-                    if (g.goodSigns.isNotEmpty) ...[
+                    if (g.goodSigns.isNotEmpty && !unchecked) ...[
                       _Label(g.reasons.isEmpty ? 'Why not:' : 'Good signs:'),
                       for (final s in g.goodSigns)
                         _IconLine(icon: Icons.check_circle_rounded, color: AppColors.safe, text: s),
@@ -149,6 +156,7 @@ class DetailsDialog extends StatelessWidget {
                     _Field('Made by', file?.company ?? file?.signer),
                     _Field('Signature', sigText, color: sigColor),
                     _Field('What it is', file?.description ?? file?.product),
+                    _Field('Windows services', g.services.isEmpty ? null : g.services.join(', ')),
                     _Field('Running copies', g.pids.length > 1 ? '${g.pids.length}' : null),
                     _Field('File created', _date(file?.created)),
                   ],

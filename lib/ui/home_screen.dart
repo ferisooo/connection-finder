@@ -203,21 +203,24 @@ class _HomeScreenState extends State<HomeScreen> {
                 _Header(controller: c, onSettings: _openSettings, onHelp: _openHelp),
                 if (c.firstScanDone)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 2, 24, 0),
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
                     child: _Summary(
                       stats: c.stats,
+                      isAdmin: c.isAdmin || c.demoMode,
                       aiRunning: c.aiBatchRunning,
                       aiDone: c.aiBatchDone,
                       aiTotal: c.aiBatchTotal,
                       onAskAi: _askAiAll,
+                      onRestartAsAdmin: _relaunchAsAdmin,
                     ),
                   ),
                 ..._banners(),
-                if (c.firstScanDone)
+                if (c.firstScanDone && (c.attentionCount > 5 || c.search.isNotEmpty))
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-                    child: _toolbar(),
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                    child: _searchBox(),
                   ),
+                const SizedBox(height: 8),
                 Expanded(child: _list()),
               ],
             ),
@@ -230,19 +233,12 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Widget> _banners() {
     final out = <Widget>[];
     void add(Widget w) => out.add(
-        Padding(padding: const EdgeInsets.fromLTRB(24, 12, 24, 0), child: w));
+        Padding(padding: const EdgeInsets.fromLTRB(20, 10, 20, 0), child: w));
 
     if (c.demoMode) {
       add(const _Banner(
         icon: Icons.science_rounded,
         text: "Demo: this computer isn't Windows, so these are made-up examples.",
-      ));
-    } else if (c.firstScanDone && !c.isAdmin) {
-      add(_Banner(
-        icon: Icons.admin_panel_settings_rounded,
-        text: "Windows hides some programs' folders. Restart as admin to see everything.",
-        actionLabel: 'Restart as admin',
-        onAction: _relaunchAsAdmin,
       ));
     }
     if (c.error != null) {
@@ -259,44 +255,26 @@ class _HomeScreenState extends State<HomeScreen> {
     return out;
   }
 
-  Widget _toolbar() {
-    final stats = c.stats;
-    return Row(
-      children: [
-        Expanded(
-          child: TextField(
-            controller: _search,
-            onChanged: (v) => c.search = v,
-            style: const TextStyle(fontSize: 16),
-            decoration: InputDecoration(
-              hintText: 'Search a program, folder, IP or country...',
-              prefixIcon: const Icon(Icons.search_rounded, color: AppColors.pink),
-              suffixIcon: c.search.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: 'Clear search',
-                      icon: const Icon(Icons.close_rounded, color: AppColors.muted),
-                      onPressed: () {
-                        _search.clear();
-                        c.search = '';
-                      },
-                    ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        _Tab(
-          label: 'Everything (${stats.programs})',
-          selected: c.filter == ViewFilter.everything,
-          onTap: () => c.filter = ViewFilter.everything,
-        ),
-        const SizedBox(width: 8),
-        _Tab(
-          label: 'Only suspicious (${stats.riskyPrograms})',
-          selected: c.filter == ViewFilter.suspicious,
-          onTap: () => c.filter = ViewFilter.suspicious,
-        ),
-      ],
+  Widget _searchBox() {
+    return TextField(
+      controller: _search,
+      onChanged: (v) => c.search = v,
+      style: const TextStyle(fontSize: 16),
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: 'Search a program, folder, IP or country...',
+        prefixIcon: const Icon(Icons.search_rounded, color: AppColors.pink),
+        suffixIcon: c.search.isEmpty
+            ? null
+            : IconButton(
+                tooltip: 'Clear search',
+                icon: const Icon(Icons.close_rounded, color: AppColors.muted),
+                onPressed: () {
+                  _search.clear();
+                  c.search = '';
+                },
+              ),
+      ),
     );
   }
 
@@ -322,7 +300,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final groups = c.visibleGroups;
     if (groups.isEmpty) {
-      final filtered = c.search.isNotEmpty || c.filter != ViewFilter.everything;
+      final searching = c.search.isNotEmpty;
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -330,19 +308,16 @@ class _HomeScreenState extends State<HomeScreen> {
             const Icon(Icons.favorite_border_rounded, size: 48, color: AppColors.pink),
             const SizedBox(height: 14),
             Text(
-              c.filter == ViewFilter.suspicious && c.search.isEmpty
-                  ? 'Nothing suspicious right now'
-                  : filtered
-                      ? 'Nothing matches your search'
-                      : 'No programs are using the network right now',
+              searching ? 'Nothing matches your search' : 'Nothing needs your attention',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 6),
             Text(
-              filtered
-                  ? 'Try "Everything" or a different search.'
-                  : 'When a program connects, it shows up here.',
+              searching
+                  ? 'Try a different word.'
+                  : 'Connection Finder keeps watching and will show anything suspicious right here.',
               style: const TextStyle(color: AppColors.muted, fontSize: 15),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
@@ -352,13 +327,15 @@ class _HomeScreenState extends State<HomeScreen> {
       controller: _scroll,
       child: ListView.builder(
         controller: _scroll,
-        padding: const EdgeInsets.fromLTRB(24, 8, 24, 28),
+        padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
         itemCount: groups.length,
         itemBuilder: (context, i) {
           final g = groups[i];
           return ProgramCard(
             key: ValueKey(g.key),
             group: g,
+            status: c.statusOf(g),
+            isAdmin: c.isAdmin || c.demoMode,
             verdict: c.verdictFor(g),
             asking: c.isAsking(g),
             lookupOn: c.settings.geoLookup,
@@ -366,6 +343,7 @@ class _HomeScreenState extends State<HomeScreen> {
             onOpenFolder: () => _openFolder(g),
             onDetails: () => _details(g),
             onStop: () => _stop(g),
+            onRestartAsAdmin: _relaunchAsAdmin,
           );
         },
       ),
@@ -411,49 +389,24 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
       child: Row(
         children: [
-          Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.pink.withValues(alpha: 0.45),
-                  blurRadius: 22,
-                  spreadRadius: -6,
-                ),
-              ],
-            ),
-            child: Image.asset('assets/icon.png', width: 52, height: 52),
-          ),
-          const SizedBox(width: 16),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GradientText(
-                  'Connection Finder',
-                  style: TextStyle(
-                      fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -0.3),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  'Shows which programs on your PC use the internet, and warns you if one looks suspicious.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 15),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+          Image.asset('assets/icon.png', width: 34, height: 34),
+          const SizedBox(width: 10),
+          const Tooltip(
+            message: 'Shows which programs on your PC use the internet, and warns you if one looks suspicious.',
+            child: GradientText(
+              'Connection Finder',
+              style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900, letterSpacing: -0.2),
             ),
           ),
-          const SizedBox(width: 16),
+          const Spacer(),
           _LiveStatus(controller: controller),
           const SizedBox(width: 8),
           _HeaderButton(
             icon: Icons.refresh_rounded,
             tooltip: 'Check again now',
-            busy: controller.scanning,
             onPressed: controller.refresh,
           ),
           const SizedBox(width: 8),
@@ -528,7 +481,7 @@ class _LiveStatusState extends State<_LiveStatus> {
           customBorder: const StadiumBorder(),
           onTap: () => settings.autoRefresh = !live,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -571,21 +524,15 @@ class _HeaderButton extends StatelessWidget {
     required this.tooltip,
     required this.onPressed,
     this.label,
-    this.busy = false,
   });
 
   final IconData icon;
   final String? label;
   final String tooltip;
   final VoidCallback onPressed;
-  final bool busy;
 
   @override
   Widget build(BuildContext context) {
-    final iconWidget = busy
-        ? const SizedBox(
-            width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-        : Icon(icon, size: 21, color: AppColors.softPink);
     return Tooltip(
       message: tooltip,
       child: Material(
@@ -593,15 +540,15 @@ class _HeaderButton extends StatelessWidget {
         shape: const StadiumBorder(side: BorderSide(color: AppColors.border)),
         child: InkWell(
           customBorder: const StadiumBorder(),
-          onTap: busy ? null : onPressed,
+          onTap: onPressed,
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: label == null ? 11 : 14, vertical: 10),
+            padding: EdgeInsets.symmetric(horizontal: label == null ? 9 : 12, vertical: 7),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                iconWidget,
+                Icon(icon, size: 20, color: AppColors.softPink),
                 if (label != null) ...[
-                  const SizedBox(width: 7),
+                  const SizedBox(width: 6),
                   Text(label!,
                       style: const TextStyle(
                           fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text)),
@@ -619,46 +566,93 @@ class _HeaderButton extends StatelessWidget {
 class _Summary extends StatelessWidget {
   const _Summary({
     required this.stats,
+    required this.isAdmin,
     required this.aiRunning,
     required this.aiDone,
     required this.aiTotal,
     required this.onAskAi,
+    required this.onRestartAsAdmin,
   });
 
   final Stats stats;
+  final bool isAdmin;
   final bool aiRunning;
   final int aiDone;
   final int aiTotal;
   final VoidCallback onAskAi;
+  final VoidCallback onRestartAsAdmin;
 
   String _programs(int n) => '$n program${n == 1 ? '' : 's'}';
+  String _look(int n) => n == 1 ? 'looks' : 'look';
+
+  String _names(List<String> names) {
+    if (names.isEmpty) return '';
+    if (names.length == 1) return ', like ${names.first}';
+    return ', like ${names.sublist(0, names.length - 1).join(', ')} and ${names.last}';
+  }
 
   @override
   Widget build(BuildContext context) {
     final d = stats.dangerousPrograms;
     final s = stats.suspiciousPrograms;
+    final u = stats.uncheckedPrograms;
     final risky = d + s > 0;
-    final color = d > 0 ? AppColors.danger : (s > 0 ? AppColors.pink : AppColors.safe);
-
+    final color = d > 0
+        ? AppColors.danger
+        : (s > 0 ? AppColors.pink : (u > 0 ? AppColors.softPink : AppColors.safe));
+    final IconData icon;
     final String headline;
-    if (d > 0 && s > 0) {
-      headline = '${_programs(d)} look${d == 1 ? 's' : ''} dangerous and $s more look${s == 1 ? 's' : ''} suspicious.';
-    } else if (d > 0) {
-      headline = '${_programs(d)} look${d == 1 ? 's' : ''} dangerous.';
-    } else if (s > 0) {
-      headline = '${_programs(s)} look${s == 1 ? 's' : ''} suspicious.';
+    final String sub;
+    Widget? action;
+
+    if (risky) {
+      icon = d > 0 ? Icons.gpp_bad_rounded : Icons.warning_amber_rounded;
+      if (d > 0 && s > 0) {
+        headline = '${_programs(d)} ${_look(d)} dangerous and $s more ${_look(s)} suspicious.';
+      } else if (d > 0) {
+        headline = '${_programs(d)} ${_look(d)} dangerous.';
+      } else {
+        headline = '${_programs(s)} ${_look(s)} suspicious.';
+      }
+      sub = 'Each card below tells you why.'
+          '${u > 0 ? " ${_programs(u)} couldn't be checked." : ''}';
+      action = _SummaryButton(
+        icon: Icons.auto_awesome_rounded,
+        label: aiRunning ? 'Asking AI... $aiDone/$aiTotal' : 'Ask AI to double-check',
+        busy: aiRunning,
+        onPressed: aiRunning ? null : onAskAi,
+      );
+    } else if (u > 0) {
+      icon = Icons.help_outline_rounded;
+      headline = "Nothing suspicious, but ${_programs(u)} couldn't be checked.";
+      sub = isAdmin
+          ? "Windows wouldn't share their details. The cards below explain."
+          : 'Windows hides them from the app. Restart as admin to check them too.';
+      if (!isAdmin) {
+        action = _SummaryButton(
+          icon: Icons.admin_panel_settings_rounded,
+          label: 'Restart as admin',
+          onPressed: onRestartAsAdmin,
+        );
+      }
+    } else if (stats.checkingPrograms > 0) {
+      icon = Icons.hourglass_top_rounded;
+      headline = 'Checking ${_programs(stats.checkingPrograms)}...';
+      sub = 'This takes a few seconds.';
     } else {
+      icon = Icons.favorite_rounded;
       headline = 'Everything looks safe right now.';
+      sub = stats.programs == 0
+          ? 'No programs are using the network.'
+          : '${_programs(stats.programs)} ${stats.programs == 1 ? 'is' : 'are'} using the network, '
+              'all trusted${_names(stats.trustedNames)}.';
     }
-    final sub = risky
-        ? "They're at the top of the list. Each card tells you why."
-        : '${_programs(stats.programs)} ${stats.programs == 1 ? 'is' : 'are'} using the network, and none of them look suspicious.';
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 16, 16, 16),
+      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
       decoration: BoxDecoration(
         color: Color.alphaBlend(color.withValues(alpha: 0.09), AppColors.card),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color.withValues(alpha: 0.5)),
         boxShadow: d > 0
             ? [
@@ -673,59 +667,30 @@ class _Summary extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.16),
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              d > 0
-                  ? Icons.gpp_bad_rounded
-                  : (s > 0 ? Icons.warning_amber_rounded : Icons.favorite_rounded),
-              color: color,
-              size: 26,
-            ),
+            child: Icon(icon, color: color, size: 22),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(headline,
                     style: const TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.text)),
-                const SizedBox(height: 3),
+                        fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text)),
+                const SizedBox(height: 2),
                 Text(sub, style: const TextStyle(fontSize: 15, color: AppColors.muted)),
               ],
             ),
           ),
-          if (risky) ...[
+          if (action != null) ...[
             const SizedBox(width: 12),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: aiRunning ? null : AppColors.pinkGradient,
-                color: aiRunning ? AppColors.cardHigh : null,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: TextButton.icon(
-                onPressed: aiRunning ? null : onAskAi,
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  disabledForegroundColor: AppColors.softPink,
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                icon: aiRunning
-                    ? const SizedBox(
-                        width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.auto_awesome_rounded, size: 20),
-                label: Text(
-                  aiRunning ? 'Asking AI... $aiDone/$aiTotal' : 'Ask AI to double-check',
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-                ),
-              ),
-            ),
+            action,
           ],
         ],
       ),
@@ -733,38 +698,40 @@ class _Summary extends StatelessWidget {
   }
 }
 
-class _Tab extends StatelessWidget {
-  const _Tab({required this.label, required this.selected, required this.onTap});
+class _SummaryButton extends StatelessWidget {
+  const _SummaryButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.busy = false,
+  });
 
+  final IconData icon;
   final String label;
-  final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback? onPressed;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
-          decoration: BoxDecoration(
-            gradient: selected ? AppColors.pinkGradient : null,
-            color: selected ? null : AppColors.panel,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: selected ? Colors.transparent : AppColors.border),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: selected ? Colors.white : AppColors.text,
-            ),
-          ),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: busy ? null : AppColors.pinkGradient,
+        color: busy ? AppColors.cardHigh : null,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: TextButton.icon(
+        onPressed: onPressed,
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white,
+          disabledForegroundColor: AppColors.softPink,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
+        icon: busy
+            ? const SizedBox(
+                width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+            : Icon(icon, size: 20),
+        label: Text(label, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
       ),
     );
   }
@@ -838,15 +805,16 @@ class HelpDialog extends StatelessWidget {
               const _HelpItem(
                 icon: Icons.apps_rounded,
                 title: 'What you see',
-                text: 'Each card is a program on your PC that is using the internet or your network, '
-                    'with the folder it runs from and who it is talking to.',
+                text: 'Connection Finder watches every program on your PC that uses the internet or your network. '
+                    'Trusted programs (signed by a known company, installed normally) stay hidden. '
+                    'You only see a card when something needs a look.',
               ),
               const _HelpItem(
                 icon: Icons.palette_rounded,
                 title: 'What the colors mean',
-                text: 'Grey "Looks safe": nothing to worry about.\n'
-                    'Pink "Suspicious": worth a closer look.\n'
-                    'Glowing "Danger!": check it right away.',
+                text: 'Pink "Suspicious": worth a closer look.\n'
+                    'Glowing "Danger!": check it right away.\n'
+                    'Grey "Couldn\'t check": Windows hid it from the app. Restart as admin to check it.',
               ),
               const _HelpItem(
                 icon: Icons.lightbulb_rounded,

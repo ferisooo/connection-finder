@@ -62,6 +62,7 @@ class ProcessInfo {
     this.path,
     this.commandLine,
     this.parentPid,
+    this.services = const [],
   });
 
   final int pid;
@@ -72,12 +73,16 @@ class ProcessInfo {
   final String? commandLine;
   final int? parentPid;
 
+  /// Windows services running inside this program (friendly names).
+  final List<String> services;
+
   ProcessInfo withPath(String? newPath) => ProcessInfo(
         pid: pid,
         name: name,
         path: newPath,
         commandLine: commandLine,
         parentPid: parentPid,
+        services: services,
       );
 }
 
@@ -378,6 +383,16 @@ class ProgramGroup {
   }
 
   Set<int> get pids => {for (final r in rows) r.pid};
+
+  /// Windows services this program runs, without duplicates.
+  List<String> get services {
+    final seen = <String>{};
+    return [
+      for (final r in rows)
+        for (final s in r.process?.services ?? const <String>[])
+          if (seen.add(s)) s,
+    ];
+  }
 
   /// Connections that go somewhere (not just waiting).
   List<ConnectionRow> get talking =>

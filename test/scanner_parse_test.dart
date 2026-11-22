@@ -85,4 +85,38 @@ void main() {
     expect(folderOf(r'C:\evil.exe'), r'C:\');
     expect(folderOf(null), isNull);
   });
+
+  group('services', () {
+    test('executableFromCommand finds the program file', () {
+      const env = {'SystemRoot': r'C:\WINDOWS'};
+      expect(executableFromCommand(r'C:\WINDOWS\system32\svchost.exe -k netsvcs -p', environment: env),
+          r'C:\WINDOWS\system32\svchost.exe');
+      expect(executableFromCommand(r'"C:\Program Files\App\app.exe" --service', environment: env),
+          r'C:\Program Files\App\app.exe');
+      expect(executableFromCommand(r'%SystemRoot%\System32\lsass.exe', environment: env),
+          r'C:\WINDOWS\System32\lsass.exe');
+      expect(executableFromCommand(r'\SystemRoot\System32\drivers\x.sys', environment: env), isNull);
+      expect(executableFromCommand('', environment: env), isNull);
+    });
+
+    test('hidden folders are filled in from the service list', () {
+      const raw = '{"admin":false,"method":"cim","conns":['
+          '{"p":"TCP","la":"0.0.0.0","lp":5040,"ra":"0.0.0.0","rp":0,"s":"Listen","id":44},'
+          '{"p":"TCP","la":"0.0.0.0","lp":7680,"ra":"0.0.0.0","rp":0,"s":"Listen","id":55}'
+          '],"procs":['
+          '{"id":44,"n":"svchost.exe","path":"","cmd":"","pp":0},'
+          '{"id":55,"n":"evil.exe","path":"","cmd":"","pp":0}'
+          '],"svcs":['
+          r'{"id":44,"n":"CDPSvc","d":"Connected Devices Platform Service","path":"C:\\WINDOWS\\system32\\svchost.exe -k LocalService -p"},'
+          r'{"id":44,"n":"DoSvc","d":"Delivery Optimization","path":"C:\\WINDOWS\\System32\\svchost.exe -k NetworkService -p"},'
+          r'{"id":55,"n":"Fake","d":"Fake Service","path":"C:\\WINDOWS\\system32\\svchost.exe -k x"}'
+          ']}';
+      final result = parseScanJson(raw);
+      final svchost = result.processes[44]!;
+      expect(svchost.path, r'C:\WINDOWS\system32\svchost.exe');
+      expect(svchost.services, ['Connected Devices Platform Service', 'Delivery Optimization']);
+      expect(result.processes[55]!.path, isNull,
+          reason: 'a service path is only trusted when the file name matches');
+    });
+  });
 }

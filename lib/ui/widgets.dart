@@ -116,16 +116,45 @@ String endpointOf(ConnectionRow row) {
   };
 }
 
-/// The "Danger!" / "Suspicious" / "Looks safe" badge.
+/// The "Danger!" / "Suspicious" / "Looks safe" / "Couldn't check" badge.
 class RiskBadge extends StatelessWidget {
-  const RiskBadge({super.key, required this.level, this.large = false});
+  const RiskBadge(
+      {super.key, required this.level, this.large = false, this.unchecked = false});
 
   final RiskLevel level;
   final bool large;
 
+  /// Show "Couldn't check" instead of "Looks safe".
+  final bool unchecked;
+
   @override
   Widget build(BuildContext context) {
     final safe = level == RiskLevel.safe;
+    if (safe && unchecked) {
+      return Container(
+        padding: EdgeInsets.symmetric(
+            horizontal: large ? 16 : 14, vertical: large ? 10 : 8),
+        decoration: BoxDecoration(
+          color: AppColors.panel,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: AppColors.safe.withValues(alpha: 0.6)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.help_outline_rounded, size: large ? 20 : 18, color: AppColors.safe),
+            const SizedBox(width: 6),
+            Text(
+              "Couldn't check",
+              style: TextStyle(
+                  color: AppColors.safe,
+                  fontSize: large ? 17 : 16,
+                  fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
+      );
+    }
     final gradient = switch (level) {
       RiskLevel.safe => null,
       RiskLevel.suspicious => AppColors.pinkGradient,

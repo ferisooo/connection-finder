@@ -4,6 +4,8 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../models.dart';
+import '../services/risk_engine.dart';
+import '../state/app_controller.dart';
 import '../theme.dart';
 import 'widgets.dart';
 
@@ -11,16 +13,22 @@ class ProgramCard extends StatefulWidget {
   const ProgramCard({
     super.key,
     required this.group,
+    required this.status,
     required this.lookupOn,
+    required this.isAdmin,
     required this.onAskAi,
     required this.onOpenFolder,
     required this.onDetails,
     required this.onStop,
+    required this.onRestartAsAdmin,
     this.verdict,
     this.asking = false,
   });
 
   final ProgramGroup group;
+  final ProgramStatus status;
+  final bool isAdmin;
+  final VoidCallback onRestartAsAdmin;
   final AiVerdict? verdict;
   final bool asking;
   final bool lookupOn;
@@ -40,8 +48,8 @@ class _ProgramCardState extends State<ProgramCard> {
   Widget build(BuildContext context) {
     final g = widget.group;
     final level = g.level;
-    final color = AppColors.forLevel(level);
     final risky = level != RiskLevel.safe;
+    final color = risky ? AppColors.forLevel(level) : AppColors.safe;
 
     final card = AnimatedContainer(
       duration: const Duration(milliseconds: 160),
@@ -50,9 +58,7 @@ class _ProgramCardState extends State<ProgramCard> {
         color: _hover ? AppColors.cardHigh : AppColors.card,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: risky
-              ? color.withValues(alpha: _hover ? 0.85 : 0.55)
-              : (_hover ? AppColors.border : AppColors.borderSoft),
+          color: color.withValues(alpha: _hover ? 0.85 : (risky ? 0.55 : 0.35)),
           width: risky ? 1.3 : 1,
         ),
         boxShadow: [
@@ -75,7 +81,7 @@ class _ProgramCardState extends State<ProgramCard> {
         child: Stack(
           children: [
             Padding(
-              padding: EdgeInsets.fromLTRB(24, 18, 18, risky ? 10 : 18),
+              padding: const EdgeInsets.fromLTRB(24, 18, 18, 10),
               child: _content(g, level, color),
             ),
             Positioned(
@@ -85,14 +91,11 @@ class _ProgramCardState extends State<ProgramCard> {
               child: Container(
                 width: 5,
                 decoration: BoxDecoration(
-                  gradient: risky
-                      ? LinearGradient(
-                          colors: [color, color.withValues(alpha: 0.35)],
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                        )
-                      : null,
-                  color: risky ? null : AppColors.border,
+                  gradient: LinearGradient(
+                    colors: [color, color.withValues(alpha: 0.35)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
                 ),
               ),
             ),
@@ -104,11 +107,7 @@ class _ProgramCardState extends State<ProgramCard> {
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
-      cursor: risky ? MouseCursor.defer : SystemMouseCursors.click,
-      // Safe cards are compact: click anywhere to see the details.
-      child: risky
-          ? card
-          : GestureDetector(onTap: widget.onDetails, child: card),
+      child: card,
     );
   }
 
@@ -123,28 +122,34 @@ class _ProgramCardState extends State<ProgramCard> {
             const SizedBox(width: 14),
             Expanded(child: _nameAndFolder(g)),
             const SizedBox(width: 12),
-            RiskBadge(level: level),
-            if (!risky) ...[
-              const SizedBox(width: 6),
-              const Icon(Icons.chevron_right_rounded, color: AppColors.faint, size: 26),
-            ],
+            RiskBadge(level: level, unchecked: widget.status == ProgramStatus.unchecked),
           ],
         ),
         const SizedBox(height: 12),
         _TalkingLine(group: g, lookupOn: widget.lookupOn),
         const SizedBox(height: 12),
-        if (risky) _WhyRisky(group: g, color: color) else _WhySafe(group: g),
+        if (risky)
+          _WhyRisky(group: g, color: color)
+        else
+          _WhyUnchecked(group: g, isAdmin: widget.isAdmin),
         if (widget.asking || widget.verdict != null) ...[
           const SizedBox(height: 12),
           AiVerdictBox(verdict: widget.verdict, asking: widget.asking),
         ],
-        if (risky) ...[
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 4,
-            runSpacing: 2,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 4,
+          runSpacing: 2,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            if (!risky && !widget.isAdmin && g.path == null)
+              _ActionButton(
+                icon: Icons.admin_panel_settings_rounded,
+                label: 'Restart as admin to check it',
+                onPressed: widget.onRestartAsAdmin,
+                highlight: true,
+              ),
+            if (risky)
               _ActionButton(
                 icon: Icons.auto_awesome_rounded,
                 label: widget.verdict == null || widget.verdict!.isError
@@ -153,25 +158,26 @@ class _ProgramCardState extends State<ProgramCard> {
                 onPressed: widget.asking ? null : widget.onAskAi,
                 highlight: true,
               ),
+            if (g.path != null)
               _ActionButton(
                 icon: Icons.folder_open_rounded,
                 label: 'Open folder',
-                onPressed: g.path == null ? null : widget.onOpenFolder,
+                onPressed: widget.onOpenFolder,
               ),
-              _ActionButton(
-                icon: Icons.info_outline_rounded,
-                label: 'Details',
-                onPressed: widget.onDetails,
-              ),
+            _ActionButton(
+              icon: Icons.info_outline_rounded,
+              label: 'Details',
+              onPressed: widget.onDetails,
+            ),
+            if (risky)
               _ActionButton(
                 icon: Icons.power_settings_new_rounded,
                 label: 'Stop program',
                 onPressed: g.isWindowsCore ? null : widget.onStop,
                 danger: true,
               ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ],
     );
   }
@@ -349,39 +355,71 @@ class _WhyRisky extends StatelessWidget {
   }
 }
 
-/// "Looks safe: Made by Google LLC (signed) · Installed in Program Files".
-class _WhySafe extends StatelessWidget {
-  const _WhySafe({required this.group});
+/// Plain-words reason why a program couldn't be checked.
+String uncheckedReason(ProgramGroup g, {required bool isAdmin}) {
+  final file = g.file;
+  final parts = <String>[];
+  if (g.path == null) {
+    parts.add(isAdmin
+        ? "Even with admin rights, Windows won't share this program's folder."
+        : 'Windows hides this program because it runs with higher rights than Connection Finder.');
+    if (windowsSystemNames.contains(g.fileName.toLowerCase())) {
+      parts.add("It has a Windows program's name, so it's probably part of Windows, but that can't be confirmed.");
+    }
+  } else if (file != null && !file.exists) {
+    parts.add("Its program file couldn't be found in its folder.");
+  } else {
+    parts.add("Windows couldn't check its digital signature.");
+  }
+  if (g.services.isNotEmpty) {
+    final shown = g.services.take(3).join(', ');
+    final more = g.services.length - 3;
+    parts.add('It runs these Windows services: $shown${more > 0 ? ' and $more more' : ''}.');
+  }
+  return parts.join(' ');
+}
+
+/// "Why it couldn't be checked:" for programs Windows hides.
+class _WhyUnchecked extends StatelessWidget {
+  const _WhyUnchecked({required this.group, required this.isAdmin});
 
   final ProgramGroup group;
+  final bool isAdmin;
 
   @override
   Widget build(BuildContext context) {
-    final signs = group.goodSigns.take(3).toList();
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.only(top: 1),
-          child: Icon(Icons.check_circle_rounded, size: 18, color: AppColors.safe),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text.rich(
-            TextSpan(children: [
-              const TextSpan(
-                text: 'Why it looks safe:  ',
-                style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.text),
-              ),
-              TextSpan(
-                text: signs.isEmpty ? 'No warning signs found' : signs.join('  ·  '),
-                style: const TextStyle(color: AppColors.muted),
-              ),
-            ]),
-            style: const TextStyle(fontSize: 15, height: 1.35),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: AppColors.safe.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.safe.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 1),
+            child: Icon(Icons.help_outline_rounded, size: 18, color: AppColors.safe),
           ),
-        ),
-      ],
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text.rich(
+              TextSpan(children: [
+                const TextSpan(
+                  text: "Why it couldn't be checked:  ",
+                  style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.text),
+                ),
+                TextSpan(
+                  text: uncheckedReason(group, isAdmin: isAdmin),
+                  style: const TextStyle(color: AppColors.muted),
+                ),
+              ]),
+              style: const TextStyle(fontSize: 15, height: 1.4),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
